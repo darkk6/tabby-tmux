@@ -6,6 +6,8 @@ import { TmuxController, TmuxPaneSession, SyncScope } from '../session'
 import { TmuxI18nService } from '../services/tmuxI18n.service'
 import { getTmuxWindowRenameTarget } from '../tmuxRename'
 
+import { buildPaneProfile, HostProfile } from './tmuxPaneProfile'
+
 @Component({
     selector: 'tmux-pane-tab',
     template: BaseTerminalTabComponent.template,
@@ -14,6 +16,11 @@ import { getTmuxWindowRenameTarget } from '../tmuxRename'
 })
 export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implements OnInit {
     @Input() controller: TmuxController
+    /**
+     * Profile of the host terminal tab the session was attached from. Only the
+     * terminal color scheme is inherited, so panes keep the host's scheme.
+     */
+    @Input() hostProfile: HostProfile | null = null
     @Input() paneId: number
 
     /**
@@ -122,14 +129,10 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
     ngOnInit(): void {
         // Profile must be set BEFORE calling super.ngOnInit() because
         // the parent class configures the terminal frontend using profile settings
-        this.profile = {
-            name: this.getPaneDisplayName(),
-            type: 'tmux',
-            options: {},
-            // Required properties for BaseTerminalTabComponent
-            behaviorOnSessionEnd: 'close',
-            terminalColorScheme: null, // Use default
-        }
+        this.profile = buildPaneProfile(
+            this.getPaneDisplayName(),
+            this.hostProfile,
+        ) as typeof this.profile
         this.updatePaneTitle()
         if (this.controller) {
             this.subscribeUntilDestroyed(this.controller.events, (event) => {

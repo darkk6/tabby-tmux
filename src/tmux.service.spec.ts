@@ -175,6 +175,17 @@ describe('TmuxService', () => {
             expect(context.sessionTab).toBeDefined()
             expect((context.sessionTab as any)?.createdInsideZone).toBe(true)
         })
+
+        it('passes the host terminal profile to the session tab', () => {
+            const { service, tabs } = createService()
+            const context = createContext()
+            const hostProfile = { name: 'ssh', terminalColorScheme: { name: 'Solarized' } }
+            Object.assign(context.terminalTab, { profile: hostProfile })
+
+            ;(service as any).replaceWithSessionTab(context)
+
+            expect(tabs[0].hostProfile).toBe(hostProfile)
+        })
     })
 
     describe('disconnectContext', () => {

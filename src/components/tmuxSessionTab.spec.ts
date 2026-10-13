@@ -224,3 +224,36 @@ describe('TmuxSessionTabComponent title ownership', () => {
         expect(switchSpy).toHaveBeenCalledWith(2, true)
     })
 })
+
+describe('TmuxSessionTabComponent pane profile', () => {
+    it('forwards the host profile to every pane tab it creates', async () => {
+        const { TmuxSessionTabComponent: SessionTab } = await import('./tmuxSessionTab.component')
+        const hostProfile = { name: 'ssh', terminalColorScheme: { name: 'Solarized' } }
+        const create = vi.fn(() => ({}))
+        const tab = Object.create(SessionTab.prototype)
+        tab.controller = { id: 'controller' }
+        tab.hostProfile = hostProfile
+        tab._tabsService = { create }
+        tab.logger = { info: vi.fn() }
+
+        tab.createPaneTab(7)
+
+        expect(create).toHaveBeenCalledWith({
+            type: expect.anything(),
+            inputs: { controller: tab.controller, paneId: 7, hostProfile },
+        })
+    })
+})
+
+describe('TmuxSessionTabComponent pane area background', () => {
+    it('uses the host terminal background, or none without a scheme', async () => {
+        const { TmuxSessionTabComponent: SessionTab } = await import('./tmuxSessionTab.component')
+        const tab = Object.create(SessionTab.prototype)
+
+        tab.hostProfile = { terminalColorScheme: { background: '#101010' } }
+        expect(tab.paneAreaBackground).toBe('#101010')
+
+        tab.hostProfile = null
+        expect(tab.paneAreaBackground).toBeNull()
+    })
+})

@@ -14,9 +14,11 @@ import {
 } from '@angular/core'
 import { Subscription } from 'rxjs'
 import { ConfigService, MenuItemOptions, PlatformService } from 'tabby-core'
+import type { TerminalColorScheme } from 'tabby-terminal'
 import { TmuxController } from '../session'
 import { TmuxI18nService } from '../services/tmuxI18n.service'
 import { formatTmuxWindowTooltip, TmuxPaneTooltipData } from './tmuxWindowTooltip'
+import { buildWindowBarColorVars } from './windowBarColors'
 import {
     clampScrollLeft,
     computeScrollHints,
@@ -35,7 +37,7 @@ interface WindowInfo {
 @Component({
     selector: 'tmux-window-bar',
     template: `
-        <div class="window-bar">
+        <div class="window-bar" [ngStyle]="colorVars">
             <div class="window-tabs" #tabsEl (wheel)="onTabsWheel($event)">
                 <button
                     *ngFor="let win of windows"
@@ -100,8 +102,9 @@ interface WindowInfo {
                 /* the tab strip keeps its own 2px rhythm with the + button */
                 gap: 2px;
                 padding: 2px 8px;
-                background: var(--theme-bg-more-2, rgba(30, 30, 30, 0.95));
-                border-top: 1px solid var(--theme-bg-less-2, rgba(255, 255, 255, 0.1));
+                background: var(--bar-bg, var(--theme-bg-more-2, rgba(30, 30, 30, 0.95)));
+                border-top: 1px solid
+                    var(--bar-border, var(--theme-bg-less-2, rgba(255, 255, 255, 0.1)));
                 min-height: 28px;
                 /* children scroll internally; nothing may spill out of the bar */
                 overflow: hidden;
@@ -168,7 +171,7 @@ interface WindowInfo {
                 border: 1px solid transparent;
                 border-radius: 3px;
                 background: transparent;
-                color: var(--theme-fg-more-2, #999);
+                color: var(--bar-fg-dim, var(--theme-fg-more-2, #999));
                 font-size: 0.82em;
                 cursor: pointer;
                 white-space: nowrap;
@@ -178,13 +181,16 @@ interface WindowInfo {
                     border-color 0.15s;
             }
             .window-tab:hover {
-                background: var(--theme-bg-less-2, rgba(255, 255, 255, 0.08));
-                color: var(--theme-fg-more, #ccc);
+                background: var(--bar-hover-bg, var(--theme-bg-less-2, rgba(255, 255, 255, 0.08)));
+                color: var(--bar-fg-more, var(--theme-fg-more, #ccc));
             }
             .window-tab.active {
-                background: var(--body-bg, rgba(255, 255, 255, 0.12));
-                color: var(--theme-fg, #fff);
-                border-color: var(--theme-fg-more-2, rgba(255, 255, 255, 0.15));
+                background: var(--bar-active-bg, var(--body-bg, rgba(255, 255, 255, 0.12)));
+                color: var(--bar-fg, var(--theme-fg, #fff));
+                border-color: var(
+                    --bar-active-border,
+                    var(--theme-fg-more-2, rgba(255, 255, 255, 0.15))
+                );
             }
             .pane-badge {
                 display: inline-flex;
@@ -194,9 +200,9 @@ interface WindowInfo {
                 height: 16px;
                 padding: 0 3px;
                 border-radius: 8px;
-                background: var(--theme-bg-less-2, rgba(255, 255, 255, 0.1));
+                background: var(--bar-hover-bg, var(--theme-bg-less-2, rgba(255, 255, 255, 0.1)));
                 font-size: 0.85em;
-                color: var(--theme-fg-more, #aaa);
+                color: var(--bar-fg-more, var(--theme-fg-more, #aaa));
             }
             .window-close {
                 display: inline-flex;
@@ -214,11 +220,15 @@ interface WindowInfo {
             }
             .window-tab:hover .window-close {
                 visibility: visible;
-                color: var(--theme-fg-more-2, #888);
+                color: var(--bar-fg-dim, var(--theme-fg-more-2, #888));
             }
             .window-close:hover {
-                background: color-mix(in srgb, var(--theme-danger, #f66) 30%, transparent);
-                color: var(--theme-danger, #f66);
+                background: color-mix(
+                    in srgb,
+                    var(--bar-danger, var(--theme-danger, #f66)) 30%,
+                    transparent
+                );
+                color: var(--bar-danger, var(--theme-danger, #f66));
             }
             /* Exit control — pinned to the right edge, never part of the
            scroll strip, so it stays reachable no matter how many windows
@@ -240,21 +250,21 @@ interface WindowInfo {
                 border: none;
                 border-radius: 3px;
                 background: transparent;
-                color: var(--theme-fg-more-2, #888);
+                color: var(--bar-fg-dim, var(--theme-fg-more-2, #888));
                 font-size: 0.8em;
                 cursor: pointer;
             }
             .bar-btn:hover {
-                background: var(--theme-bg-less-2, rgba(255, 255, 255, 0.1));
-                color: var(--theme-fg-more, #ccc);
+                background: var(--bar-hover-bg, var(--theme-bg-less-2, rgba(255, 255, 255, 0.1)));
+                color: var(--bar-fg-more, var(--theme-fg-more, #ccc));
             }
             .add-btn {
                 /* directly after the scroll strip — never shrinks away with it */
                 flex: 0 0 auto;
-                color: var(--theme-fg-more-2, #666);
+                color: var(--bar-fg-dim, var(--theme-fg-more-2, #666));
             }
             .add-btn:hover {
-                color: var(--theme-fg-more, #aaa);
+                color: var(--bar-fg-more, var(--theme-fg-more, #aaa));
             }
         `,
     ],
@@ -262,6 +272,12 @@ interface WindowInfo {
 export class TmuxWindowBarComponent implements OnInit, OnChanges, AfterViewInit, OnDestroy {
     @Input() controller: TmuxController
     @Input() activeWindowId: number | null = null
+    /** Terminal color scheme of the hosted profile; when set, the bar follows it. */
+    @Input() colorScheme: TerminalColorScheme | null = null
+
+    get colorVars(): Record<string, string> {
+        return buildWindowBarColorVars(this.colorScheme)
+    }
 
     @Output() windowSwitch = new EventEmitter<number>()
     @Output() windowClose = new EventEmitter<number>()

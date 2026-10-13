@@ -163,6 +163,7 @@ export class TmuxService {
                 inputs: {
                     existingController: context.controller,
                     profile: { sessionName: context.controller.getSessionName() },
+                    hostProfile: context.terminalTab.profile,
                 },
             }) as TmuxSessionTabComponent
 

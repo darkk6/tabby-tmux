@@ -27,6 +27,7 @@ import { TmuxService } from '../services/tmux.service'
 import { TmuxI18nService } from '../services/tmuxI18n.service'
 import { TMUX_COMMAND_TOLERATE_ERRORS } from '../gateway'
 import { TmuxPaneTabComponent } from './tmuxPaneTab.component'
+import { HostProfile } from './tmuxPaneProfile'
 import { parseTmuxLayout, TmuxLayoutNode, flattenLayout } from '../layoutParser'
 import { renderDividers } from '../divider'
 import { ResizeDirection, SplitDirection } from '../tmuxKeymap'
@@ -65,7 +66,7 @@ interface RenameRequest {
         '[class.tmux-session-host]': 'true',
     },
     template: `
-        <div class="pane-area" #paneAreaEl>
+        <div class="pane-area" #paneAreaEl [style.background]="paneAreaBackground">
             <ng-container #vc></ng-container>
         </div>
         <tmux-search-panel
@@ -85,6 +86,7 @@ interface RenameRequest {
         <tmux-window-bar
             [controller]="controller"
             [activeWindowId]="activeWindowId"
+            [colorScheme]="hostProfile?.terminalColorScheme ?? null"
             (windowSwitch)="enqueueSwitchToWindow($event, true)"
             (windowClose)="onWindowClose($event)"
             (renameRequested)="requestWindowRename($event)"
@@ -179,6 +181,16 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
 
     @Input() profile: TmuxSessionProfile = {}
     @Input() existingController!: TmuxController
+    /** Host terminal tab profile; forwarded to pane tabs so they keep its color scheme. */
+    @Input() hostProfile: HostProfile | null = null
+
+    /**
+     * Background of the pane area, including its padding margin. Follows the host
+     * profile's terminal background so the margin blends with the panes.
+     */
+    get paneAreaBackground(): string | null {
+        return this.hostProfile?.terminalColorScheme?.background ?? null
+    }
 
     private logger: Logger
     private eventSubscription: Subscription | null = null
@@ -1364,6 +1376,7 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
             inputs: {
                 controller: this.controller,
                 paneId,
+                hostProfile: this.hostProfile,
             },
         }) as any as TmuxPaneTabComponent
         this.logger.info(`TmuxPaneTabComponent created for pane %${paneId}`)
