@@ -79,6 +79,22 @@ npm install tabby-tmux
 
 在 **Settings → Tmux → 恢复历史行数** 中设置每个 pane 恢复的最近历史行数，默认 **5000**。按 tmux 的物理行计数，不包含当前屏幕；设为 **0** 时仅恢复当前屏幕。修改后在下次恢复或重新 attach 时生效，不删除 tmux 中的历史。
 
+实际恢复行数还受 tmux 已保存的历史行数和 Tabby 终端的回滚容量限制。tmux 的 `history-limit` 默认是 **2000**，因此即使插件设置为 5000，也可能只能恢复约 2000 行。插件不会修改这个 tmux 设置，也无法恢复 tmux 已丢弃的历史。
+
+如需保留更多历史，在运行 tmux 的机器上（SSH 场景为远端主机）的 `~/.tmux.conf` 中加入以下配置，再执行 `tmux source-file ~/.tmux.conf` 加载：
+
+```tmux
+set -g history-limit 50000
+```
+
+在 tmux 3.4 中，修改 `history-limit` 仅对新创建的 pane 生效；已有 pane 会保留原来的容量，重新 attach 也不会扩大容量。加载配置后，需要新建 window 或 pane 才能使用更大的容量。同时，Tabby 终端的回滚容量也应不小于期望恢复的行数。
+
+可用以下命令查看每个 pane 当前保存的历史行数及实际容量：
+
+```sh
+tmux list-panes -a -F '#{pane_id} history_size=#{history_size} history_limit=#{history_limit}'
+```
+
 ### 右键行为
 
 默认情况下，在 tmux pane 内右键会直接弹出 **tmux pane 上下文菜单**（用于 _Enter/Exit Tmux Mode_、_New Window_ 等操作），而**不会**遵循 Tabby 的 _Settings → Terminal → "On right-click"_ 设置。
