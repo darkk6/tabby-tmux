@@ -10,6 +10,9 @@ const englishTranslations = {
     'settings.copySessionTitleFormat': 'Copy variables',
     'settings.sessionTitleFormatCopied': 'Copied',
     'settings.commandTimeout': 'Command timeout (ms):',
+    'settings.historyRestoreLimit': 'History rows to restore:',
+    'settings.historyRestoreLimitHelp':
+        'Restore the most recent history rows per pane (default: 5000). 0 restores only the current screens. Applies to the next restore; tmux history is kept.',
     'settings.sendKeysChunkSize': 'Send-keys chunk size:',
     'settings.resizeDebounce': 'Resize debounce (ms):',
     'settings.debugLogging': 'Debug logging:',
@@ -68,6 +71,9 @@ const chineseTranslations: { [K in keyof typeof englishTranslations]: string } =
     'settings.copySessionTitleFormat': '复制变量',
     'settings.sessionTitleFormatCopied': '已复制',
     'settings.commandTimeout': '命令超时（毫秒）：',
+    'settings.historyRestoreLimit': '恢复历史行数：',
+    'settings.historyRestoreLimitHelp':
+        '每个 pane 恢复最近的历史行数，默认 5000。0 表示仅恢复当前屏幕。下次恢复时生效，不删除 tmux 中的历史。',
     'settings.sendKeysChunkSize': 'Send-keys 分块大小：',
     'settings.resizeDebounce': '调整大小防抖（毫秒）：',
     'settings.debugLogging': '调试日志：',

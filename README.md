@@ -75,6 +75,10 @@ npm install tabby-tmux
 
 ## Configuration
 
+### History restoration limit
+
+Set **Settings → Tmux → History rows to restore** to limit each pane to its most recent history rows (default: **5000**). The limit counts tmux physical rows and excludes the current screen. Set it to **0** to restore only the current screens. Changes apply to the next restoration or attach and do not delete history from tmux.
+
 ### Right-click behavior
 
 By default, right-clicking inside a tmux pane opens the **tmux pane context menu** (used for actions like _Enter/Exit Tmux Mode_, _New Window_, etc.), regardless of the _Settings → Terminal → "On right-click"_ option.

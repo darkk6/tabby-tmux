@@ -15,6 +15,16 @@
                 width: 100%;
                 display: table-cell;
             }
+            .setting-value {
+                display: table-cell;
+                .form-control {
+                    display: block;
+                }
+                small {
+                    display: block;
+                    margin-top: 0.35em;
+                }
+            }
         }
     }
     .format-help {

@@ -1,9 +1,11 @@
 import { ChangeDetectorRef, Component, OnDestroy } from '@angular/core'
 import { ConfigService } from 'tabby-core'
 import { Subscription } from 'rxjs'
+import type { NgModel } from '@angular/forms'
 import { TmuxI18nService } from '../services/tmuxI18n.service'
 import { TmuxConfigChangeService } from '../services/tmuxConfigChange.service'
 import { copyTextToClipboard } from '../clipboard'
+import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../historyRestore'
 
 // eslint-disable-next-line new-cap
 @Component({
@@ -32,6 +34,27 @@ import { copyTextToClipboard } from '../clipboard'
                         [(ngModel)]="config.store.tmuxPlugin.sessionTitleFormat"
                         (ngModelChange)="saveConfig()"
                     />
+                </div>
+                <div class="row">
+                    <div class="header">
+                        <div class="title">{{ i18n.t('settings.historyRestoreLimit') }}</div>
+                    </div>
+                    <div class="setting-value">
+                        <input
+                            class="form-control"
+                            type="number"
+                            #historyLimitModel="ngModel"
+                            min="0"
+                            [max]="maxHistoryRestoreLimit"
+                            step="1"
+                            [ngModel]="config.store.tmuxPlugin.historyRestoreLimit"
+                            [ngModelOptions]="{ updateOn: 'blur' }"
+                            (ngModelChange)="setHistoryRestoreLimit($event, historyLimitModel)"
+                        />
+                        <small class="text-muted">{{
+                            i18n.t('settings.historyRestoreLimitHelp')
+                        }}</small>
+                    </div>
                 </div>
                 <div class="row">
                     <div class="header">
@@ -117,6 +140,7 @@ export class TmuxSettingsTabComponent implements OnDestroy {
     private languageSubscription: Subscription
     private copyResetTimer: ReturnType<typeof setTimeout> | null = null
     helpCopied = false
+    readonly maxHistoryRestoreLimit = MAX_HISTORY_RESTORE_LIMIT
 
     constructor(
         public config: ConfigService,
@@ -132,6 +156,15 @@ export class TmuxSettingsTabComponent implements OnDestroy {
     saveConfig(): void {
         this.config.save()
         this.configChanges.notifyChanged()
+    }
+
+    setHistoryRestoreLimit(value: unknown, model?: NgModel): void {
+        const limit = normalizeHistoryRestoreLimit(value)
+        this.config.store.tmuxPlugin.historyRestoreLimit = limit
+        if (value !== limit) {
+            model?.control.setValue(limit, { emitViewToModelChange: false })
+        }
+        this.saveConfig()
     }
 
     async copySessionTitleFormatVariables(): Promise<void> {

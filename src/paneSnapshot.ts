@@ -2,7 +2,8 @@ import { buildModeSequences, PaneState } from './paneState'
 
 /** A snapshot separates scrollback from both terminal screens. */
 export interface PaneSnapshot {
-    scrollback: string
+    /** null means no history was captured; an empty string can be a real blank row. */
+    scrollback: string | null
     /** Logical lines, so xterm can reconstruct normal-screen soft wraps. */
     normalScreen: string
     /** Physical rows of the active alternate screen, or null in normal mode. */
@@ -84,7 +85,7 @@ export function buildSnapshotRestore(snapshot: PaneSnapshot): string {
         csi('3J') +
         csi('H')
 
-    if (state.historySize) {
+    if (snapshot.scrollback !== null) {
         result += restoreLogicalContent(snapshot.scrollback) + csi('0m')
         if (!snapshot.historyJoinsScreen) result += '\r\n'
     }

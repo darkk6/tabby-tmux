@@ -6,6 +6,7 @@ import { Injector } from '@angular/core'
 import { TmuxCommand, TmuxGateway, TMUX_COMMAND_TOLERATE_ERRORS } from './gateway'
 import { parsePaneState } from './paneState'
 import { buildSnapshotRestore, PaneSnapshot } from './paneSnapshot'
+import { normalizeHistoryRestoreLimit } from './historyRestore'
 import {
     ResizeDirection,
     SplitDirection,
@@ -1130,6 +1131,9 @@ export class TmuxController {
     }
 
     private async runCaptureSnapshotForPane(paneId: number): Promise<PaneSnapshot | null> {
+        const historyLimit = normalizeHistoryRestoreLimit(
+            this.configService?.store.tmuxPlugin?.historyRestoreLimit,
+        )
         const stateFormat = [
             'pane_id=#{pane_id}',
             'alternate_on=#{alternate_on}',
@@ -1184,9 +1188,10 @@ export class TmuxController {
                 // -E-1 with no history clamps to visible row 0. Skip it when
                 // history_size is zero or the first screen row is duplicated.
                 const commands: TmuxCommand[] = []
-                if (state.historySize > 0) {
+                const captureHistory = state.historySize > 0 && historyLimit > 0
+                if (captureHistory) {
                     commands.push(
-                        { command: `capture-pane -peJN -S- -E-1 -t %${paneId}` },
+                        { command: `capture-pane -peJN -S-${historyLimit} -E-1 -t %${paneId}` },
                         // Only the two physical rows around the boundary are
                         // needed to detect a soft wrap; never read all history twice.
                         { command: `capture-pane -peJN -S-1 -E0 -t %${paneId}` },
@@ -1203,8 +1208,8 @@ export class TmuxController {
                     })
                 commands.push({ command: stateCommand })
                 const responses = await this.gateway.sendCommands(commands)
-                const scrollback = state.historySize > 0 ? responses.shift() : ''
-                const boundary = state.historySize > 0 ? responses.shift() : ''
+                const scrollback = captureHistory ? responses.shift() : null
+                const boundary = captureHistory ? responses.shift() : ''
                 const normalScreen = responses.shift()
                 const alternateScreen = state.alternateOn ? responses.shift() : null
                 const after = parseState(responses.shift())
@@ -1212,7 +1217,7 @@ export class TmuxController {
                     state.columns !== after.columns ||
                     state.rows !== after.rows ||
                     state.alternateOn !== after.alternateOn ||
-                    (state.historySize === 0) !== (after.historySize === 0)
+                    (historyLimit > 0 && (state.historySize === 0) !== (after.historySize === 0))
                 ) {
                     failure = new Error(`Pane %${paneId} changed size or screen while capturing`)
                     continue
@@ -1221,7 +1226,7 @@ export class TmuxController {
                     scrollback,
                     normalScreen,
                     alternateScreen,
-                    historyJoinsScreen: state.historySize > 0 && !boundary.includes('\n'),
+                    historyJoinsScreen: captureHistory && !boundary.includes('\n'),
                     state: after,
                     outputSequence,
                 }

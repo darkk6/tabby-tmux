@@ -28,7 +28,10 @@ function state(alternate = false, history = 0, rows = 3): string {
     )
 }
 
-function setup(respond: (command: string) => string | Promise<string>) {
+function setup(
+    respond: (command: string) => string | Promise<string>,
+    historyRestoreLimit?: unknown,
+) {
     const logger = {
         debug: vi.fn(),
         info: vi.fn(),
@@ -40,7 +43,7 @@ function setup(respond: (command: string) => string | Promise<string>) {
         null as unknown as Injector,
         () => undefined,
         () => undefined,
-        { store: { tmuxPlugin: {} } } as ConfigService,
+        { store: { tmuxPlugin: { historyRestoreLimit } } } as ConfigService,
     )
     const commands = vi
         .spyOn(controller.gateway, 'sendCommand')
@@ -60,6 +63,53 @@ function setup(respond: (command: string) => string | Promise<string>) {
 }
 
 describe('pane snapshot capture', () => {
+    it.each([
+        { limit: undefined, expected: 5000 },
+        { limit: 1, expected: 1 },
+        { limit: 1234, expected: 1234 },
+        { limit: -1, expected: 5000 },
+        { limit: Number.MAX_SAFE_INTEGER, expected: 5000 },
+        { limit: '1; kill-server', expected: 5000 },
+    ])(
+        'captures only the last $expected history rows for limit=$limit',
+        async ({ limit, expected }) => {
+            const { controller, commands } = setup((command) => {
+                if (command.startsWith('list-panes')) return state(false, 50000)
+                if (command.includes('-E0')) return 'history tail\nscreen'
+                if (command.includes('-E-1')) return 'history tail'
+                return 'screen\n\n'
+            }, limit)
+            expect(await controller.ensurePaneSnapshot(1)).toBe(true)
+            const captures = commands.mock.calls
+                .map(([command]) => command)
+                .filter((command) => command.startsWith('capture'))
+            expect(captures).toEqual([
+                `capture-pane -peJN -S-${expected} -E-1 -t %1`,
+                'capture-pane -peJN -S-1 -E0 -t %1',
+                'capture-pane -peJN -S0 -t %1',
+            ])
+        },
+    )
+
+    it.each([false, true])(
+        'captures both screens without history for limit=0, alternate=%s',
+        async (alternate) => {
+            const { controller, commands } = setup(
+                (command) =>
+                    command.startsWith('list-panes') ? state(alternate, 50000) : 'screen\n\n',
+                0,
+            )
+            expect(await controller.ensurePaneSnapshot(1)).toBe(true)
+            const captures = commands.mock.calls
+                .map(([command]) => command)
+                .filter((command) => command.startsWith('capture'))
+            expect(captures).toEqual(
+                alternate
+                    ? ['capture-pane -peJN -a -S0 -t %1', 'capture-pane -peN -S0 -t %1']
+                    : ['capture-pane -peJN -S0 -t %1'],
+            )
+        },
+    )
     it('accepts cursor/history changes from normal output without retransmitting large history', async () => {
         let reads = 0
         const { controller, commands } = setup((command) => {
@@ -70,11 +120,11 @@ describe('pane snapshot capture', () => {
                 )
             }
             if (command.includes('-S-1')) return 'history tail\nfirst row'
-            if (command.includes('-S- ')) return 'full history'
+            if (command.includes('-E-1')) return 'full history'
             return 'first row\nlast row\n'
         })
         expect(await controller.ensurePaneSnapshot(1)).toBe(true)
-        expect(commands.mock.calls.filter(([command]) => command.includes('-S- '))).toHaveLength(1)
+        expect(commands.mock.calls.filter(([command]) => command.includes('-E-1'))).toHaveLength(1)
         expect(reads).toBe(2)
         const session = new TmuxPaneSession({ warn: vi.fn() } as unknown as Logger, controller, 1)
         const output: string[] = []
@@ -89,7 +139,7 @@ describe('pane snapshot capture', () => {
             const { controller, commands } = setup((command) => {
                 if (command.startsWith('list-panes')) return state(false, 50000)
                 if (command.includes('-S-1')) return wrapped ? 'tailfirst' : 'tail\nfirst'
-                if (command.includes('-S- ')) return 'history tail'
+                if (command.includes('-E-1')) return 'history tail'
                 return 'first\nsecond\n'
             })
             await controller.ensurePaneSnapshot(1)
@@ -114,7 +164,7 @@ describe('pane snapshot capture', () => {
             throw new Error('Command timed out after 30000ms')
         })
         expect(await controller.ensurePaneSnapshot(1)).toBe(false)
-        expect(commands.mock.calls.filter(([command]) => command.includes('-S- '))).toHaveLength(1)
+        expect(commands.mock.calls.filter(([command]) => command.includes('-E-1'))).toHaveLength(1)
     })
 
     it('serializes concurrent captures and shares concurrent requests for one pane', async () => {

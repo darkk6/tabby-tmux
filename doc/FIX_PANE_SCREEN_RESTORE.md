@@ -18,12 +18,14 @@ Vim 使用 alternate screen 时，普通 `capture-pane` 的可见部分是 Vim �
 
 | 数据                  | 捕获方式                                               | 写入方式                                                     |
 | --------------------- | ------------------------------------------------------ | ------------------------------------------------------------ |
-| Scrollback            | `capture-pane -peJN -S- -E-1`；`history_size=0` 时跳过 | 写入 normal buffer，保留空行、重复行和软折行                 |
+| Scrollback            | `capture-pane -peJN -S-N -E-1`；默认 N=5000，N=0 或无历史时跳过 | 写入 normal buffer，保留空行、重复行和软折行                 |
 | 普通屏幕              | `capture-pane -peJN -S0`；`alternate_on=1` 时加 `-a`   | 接续 scrollback；保留 `-J`，使 xterm 能重建软折行            |
 | 当前 alternate screen | `capture-pane -peN -S0`；仅在 alternate 模式下请求     | 暂停自动换行，按物理行定位绘制，避免底行滚动                 |
 | 终端状态              | 捕获前后分别 `list-panes -F`                           | 绘制完成后恢复光标、滚动区域、origin、insert、键盘和鼠标模式 |
 
-额外捕获历史最后一个物理行与屏幕第 0 行的片段（`-S-1 -E0`），根据两行之间是否有换行判断软折行，避免重复传输完整历史，也避免在边界插入多余换行。`capture-pane -a` 的 saved grid 不包含 scrollback，因此历史始终从普通的 `capture-pane` 请求读取。
+恢复历史行数由 `tmuxPlugin.historyRestoreLimit` 配置，默认 5000，按 tmux 物理行计数且不包含当前屏幕。0 表示仅恢复当前屏幕，不改变服务端历史。未捕获历史用 `scrollback: null` 表示，避免与真实的空白历史行混淆。
+
+需要恢复历史时，额外捕获历史最后一个物理行与屏幕第 0 行的片段（`-S-1 -E0`），根据两行之间是否有换行判断软折行，避免重复传输完整历史，也避免在边界插入多余换行。`capture-pane -a` 的 saved grid 不包含 scrollback，因此历史始终从普通的 `capture-pane` 请求读取。
 
 捕获命令与结束状态查询一起发送。捕获前后尺寸、normal/alternate 模式或历史有无发生变化时重试，最多三次；普通光标移动与 history size 增长不触发重传。使用结束状态恢复终端模式，捕获错误或超时不追加历史重试，也不能当作屏幕内容恢复。活动屏幕响应结束时同步记录 `%output` 序号，快照只覆盖该序号及以前的输出，之后的输出按原顺序接续。即使响应与后续 `%output` 在同一个数据包中，也能保留正确边界。采集失败则保留缓冲的实时输出；销毁后完成的采集不能交给重新挂载的 pane。
 

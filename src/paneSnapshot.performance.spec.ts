@@ -8,6 +8,7 @@ import { Terminal } from '@xterm/headless'
 import type { ConfigService, Logger } from 'tabby-core'
 import type { Injector } from '@angular/core'
 import { TmuxController, TmuxPaneSession } from './session'
+import { DEFAULT_HISTORY_RESTORE_LIMIT } from './historyRestore'
 
 vi.mock('tabby-terminal', async () => {
     const { Subject } = await import('rxjs')
@@ -32,15 +33,17 @@ const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'"
 
 describe.skipIf(!binary)('snapshot performance regression budgets', () => {
     it.each([
-        { panes: 1, lines: 1000, workload: 'shell' },
-        { panes: 1, lines: 1000, workload: 'wrapped' },
-        { panes: 1, lines: 50000, workload: 'shell' },
-        { panes: 4, lines: 50000, workload: 'shell' },
-        { panes: 1, lines: 50000, workload: 'busy' },
-        { panes: 1, lines: 50000, workload: 'vim' },
+        { panes: 1, lines: 1000, workload: 'shell', limit: 100000 },
+        { panes: 1, lines: 1000, workload: 'wrapped', limit: 100000 },
+        { panes: 1, lines: 50000, workload: 'shell', limit: 100000 },
+        { panes: 4, lines: 50000, workload: 'shell', limit: 100000 },
+        { panes: 1, lines: 50000, workload: 'busy', limit: 100000 },
+        { panes: 1, lines: 50000, workload: 'vim', limit: 100000 },
+        { panes: 1, lines: 50000, workload: 'shell', limit: undefined },
+        { panes: 4, lines: 50000, workload: 'shell', limit: undefined },
     ])(
-        '$panes pane(s), $lines lines each, $workload, 189x52, 8 MiB/s transport',
-        async ({ panes, lines, workload }) => {
+        '$panes pane(s), $lines lines each, $workload, limit=$limit, 189x52, 8 MiB/s transport',
+        async ({ panes, lines, workload, limit }) => {
             const root = mkdtempSync(join(tmpdir(), 'tabby-tmux-perf-'))
             const socket = join(root, 'socket')
             const config = join(root, 'tmux.conf')
@@ -91,17 +94,23 @@ describe.skipIf(!binary)('snapshot performance regression budgets', () => {
                     await expect
                         .poll(() => cli('display-message', '-p', '#{alternate_on}').trim())
                         .toBe('1')
+                const historyLimit = limit ?? DEFAULT_HISTORY_RESTORE_LIMIT
+                const historyStarts: string[] = []
                 const historyBytes = cli('list-panes', '-s', '-F', '#{pane_id}')
                     .trim()
                     .split('\n')
-                    .reduce(
-                        (sum, id) =>
-                            sum +
-                            Buffer.byteLength(
-                                cli('capture-pane', '-peJN', '-S-', '-E-1', '-t', id),
-                            ),
-                        0,
-                    )
+                    .reduce((sum, id) => {
+                        const history = cli(
+                            'capture-pane',
+                            '-peJN',
+                            `-S-${historyLimit}`,
+                            '-E-1',
+                            '-t',
+                            id,
+                        )
+                        historyStarts.push(history.split('\n')[0].slice(0, 189).trimEnd())
+                        return sum + Buffer.byteLength(history)
+                    }, 0)
                 const logger = {
                     debug: vi.fn(),
                     info: vi.fn(),
@@ -110,7 +119,7 @@ describe.skipIf(!binary)('snapshot performance regression budgets', () => {
                 } as unknown as Logger
                 control = spawn(binary, ['-S', socket, '-C', 'attach', '-t', 'perf'])
                 let bytes = 0
-                let fullHistoryReads = 0
+                let historyReads = 0
                 const started = performance.now()
                 let firstPaneMs: number | undefined
                 let firstRenderedMs: number | undefined
@@ -119,11 +128,15 @@ describe.skipIf(!binary)('snapshot performance regression budgets', () => {
                     logger,
                     null as unknown as Injector,
                     (data) => {
-                        fullHistoryReads += (data.match(/capture-pane[^\r]*-S- /g) ?? []).length
+                        historyReads += (data.match(/capture-pane[^\r]*-E-1 /g) ?? []).length
                         control.stdin.write(data.replace(/\r/g, '\n'))
                     },
                     () => undefined,
-                    { store: { tmuxPlugin: { commandTimeoutMs: 30000 } } } as ConfigService,
+                    {
+                        store: {
+                            tmuxPlugin: { commandTimeoutMs: 30000, historyRestoreLimit: limit },
+                        },
+                    } as ConfigService,
                 )
                 controller.events.subscribe((event) => {
                     if (event.type !== 'pane-add') return
@@ -182,7 +195,8 @@ describe.skipIf(!binary)('snapshot performance regression budgets', () => {
                     workload,
                     historyBytes,
                     receivedBytes: bytes,
-                    fullHistoryReads,
+                    historyReads,
+                    historyLimit,
                     firstPaneMs: Math.round(firstPaneMs),
                     firstRenderedMs: Math.round(firstRenderedMs),
                     totalMs: Math.round(totalMs),
@@ -192,10 +206,13 @@ describe.skipIf(!binary)('snapshot performance regression budgets', () => {
                 if (process.env.TMUX_BENCH_OUTPUT)
                     appendFileSync(process.env.TMUX_BENCH_OUTPUT, JSON.stringify(metrics) + '\n')
                 expect(terminals).toHaveLength(panes)
-                for (const term of terminals) {
-                    expect(term.buffer.normal.getLine(0)?.translateToString(true)).toContain(
-                        'row 00000',
+                for (const [i, term] of terminals.entries()) {
+                    expect(term.buffer.normal.getLine(0)?.translateToString(true).trimEnd()).toBe(
+                        historyStarts[i],
                     )
+                    if (limit === undefined && workload === 'shell') {
+                        expect(term.buffer.normal.baseY).toBe(DEFAULT_HISTORY_RESTORE_LIMIT)
+                    }
                     expect(
                         [3, 2, 1]
                             .map((offset) =>
@@ -226,7 +243,7 @@ describe.skipIf(!binary)('snapshot performance regression budgets', () => {
                 }
                 expect(logger.warn).not.toHaveBeenCalled()
                 // Work budgets are deterministic across CI machines; timing is reported.
-                expect(fullHistoryReads).toBe(panes)
+                expect(historyReads).toBe(panes)
                 expect(bytes).toBeLessThan(historyBytes * 1.15 + panes * 32768)
                 expect(totalMs).toBeLessThan(totalBudgetMs)
                 if (panes > 1) expect(firstRenderedMs).toBeLessThan(totalMs * 0.7)

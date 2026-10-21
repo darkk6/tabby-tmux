@@ -8,7 +8,7 @@ afterEach(() => terminals.splice(0).forEach((terminal) => terminal.dispose()))
 
 function snapshot(overrides: Partial<PaneSnapshot> = {}): PaneSnapshot {
     return {
-        scrollback: '',
+        scrollback: null,
         normalScreen: 'shell$ vim\n\n',
         alternateScreen: 'VIM\nline 2\nSTATUS',
         historyJoinsScreen: false,
@@ -47,6 +47,28 @@ function screen(terminal: Terminal): string[] {
 }
 
 describe('pane snapshot restoration in xterm', () => {
+    it('does not insert a history row when history restoration is disabled', async () => {
+        const frame = snapshot({ normalScreen: 'screen\n\n', alternateScreen: null })
+        frame.state.alternateOn = false
+        frame.state.historySize = 50000
+        const terminal = await restore(frame)
+        expect(terminal.buffer.normal.baseY).toBe(0)
+        expect(screen(terminal)).toEqual(['screen', '', ''])
+    })
+
+    it('preserves a captured history row even when that row is blank', async () => {
+        const frame = snapshot({
+            scrollback: '',
+            normalScreen: 'screen\n\n',
+            alternateScreen: null,
+        })
+        frame.state.alternateOn = false
+        frame.state.historySize = 50000
+        const terminal = await restore(frame)
+        expect(terminal.buffer.normal.baseY).toBe(1)
+        expect(terminal.buffer.normal.getLine(0)?.translateToString(true)).toBe('')
+        expect(screen(terminal)).toEqual(['screen', '', ''])
+    })
     it('shows Vim in alternate and restores the saved shell and cursor on exit', async () => {
         const frame = snapshot({ scrollback: 'older\nlatest' })
         frame.state.historySize = 2

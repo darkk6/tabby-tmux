@@ -75,6 +75,10 @@ npm install tabby-tmux
 
 ## 配置
 
+### 恢复历史行数
+
+在 **Settings → Tmux → 恢复历史行数** 中设置每个 pane 恢复的最近历史行数，默认 **5000**。按 tmux 的物理行计数，不包含当前屏幕；设为 **0** 时仅恢复当前屏幕。修改后在下次恢复或重新 attach 时生效，不删除 tmux 中的历史。
+
 ### 右键行为
 
 默认情况下，在 tmux pane 内右键会直接弹出 **tmux pane 上下文菜单**（用于 _Enter/Exit Tmux Mode_、_New Window_ 等操作），而**不会**遵循 Tabby 的 _Settings → Terminal → "On right-click"_ 设置。

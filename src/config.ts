@@ -1,4 +1,5 @@
 import { ConfigProvider } from 'tabby-core'
+import { DEFAULT_HISTORY_RESTORE_LIMIT } from './historyRestore'
 
 // eslint-disable-next-line new-cap
 export class TmuxConfigProvider extends ConfigProvider {
@@ -6,6 +7,7 @@ export class TmuxConfigProvider extends ConfigProvider {
         tmuxPlugin: {
             defaultSessionName: 'default',
             sessionTitleFormat: '#{window_name} - #{host}',
+            historyRestoreLimit: DEFAULT_HISTORY_RESTORE_LIMIT,
             commandTimeoutMs: 30_000,
             sendKeysChunkSize: 200,
             resizeDebounceMs: 150,
