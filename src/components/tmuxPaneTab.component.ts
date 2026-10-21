@@ -176,6 +176,12 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
             const frontend = this.frontend as any
             if (frontend) {
                 frontend.enableResizing = false
+                const bufferChange = frontend.xterm?.buffer.onBufferChange(
+                    (buffer: { type: string }) => {
+                        ;(this.session as TmuxPaneSession)?.screenBufferChanged(buffer.type)
+                    },
+                )
+                this.destroyed$.pipe(first()).subscribe(() => bufferChange?.dispose())
                 // The frontend's resizeHandler (window resize + ResizeObserver)
                 // calls fitAddon.fit() unconditionally and ignores enableResizing.
                 // Replace fit() with a no-op so the grid stays exactly what tmux
@@ -228,18 +234,17 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
         if (!xterm) return
         if (xterm.cols !== this._tmuxCols || xterm.rows !== this._tmuxRows) {
             try {
+                ;(this.session as TmuxPaneSession)?.gridResized(xterm.buffer.active.type)
                 xterm.resize(this._tmuxCols, this._tmuxRows)
             } catch (e) {
                 this.logger.warn(`Failed to resize pane %${this.paneId} grid`, e)
             }
         }
 
-        // xterm.resize() clears the alternate screen buffer.
-        // Re-apply saved alternate content if this pane was on it.
+        // Resize preserves the current buffer; tmux's live stream supplies
+        // the application's redraw. Replaying an attach-time frame here
+        // would overwrite newer Vim output or re-enter an exited TUI.
         const session = this.session as any
-        if (session?.pendingAltRestore && this.controller) {
-            this.controller.reapplyAltContent(session)
-        }
 
         // Grid change alters the scroll metrics — refresh the scrollbar thumb.
         this.updateScrollbarThumb()

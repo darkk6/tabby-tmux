@@ -103,6 +103,22 @@ describe('parsePaneState', () => {
         expect(state.rows).toBe(40)
     })
 
+    it('parses snapshot geometry, history size, origin and SGR mouse mode', () => {
+        const state = parsePaneState(
+            'pane_id=%5\tpane_width=80\tpane_height=24\thistory_size=123\t' +
+                'origin_flag=1\tmouse_sgr_flag=1',
+            5,
+        )
+        expect(state).toMatchObject({
+            columns: 80,
+            rows: 24,
+            historySize: 123,
+            originFlag: true,
+            mouseSgrMode: true,
+        })
+        expect(buildModeSequences(state)).toContain('\x1b[?1006h')
+    })
+
     it('parses boolean flags from 0/1 values', () => {
         const state = parsePaneState(
             formatStateLine(
@@ -142,7 +158,8 @@ describe('buildModeSequences', () => {
         })
         const seq = buildModeSequences(state)
         expect(seq).toBe(
-            '\x1b[5;21r' + // DECSTBM (upper+1;lower+1)
+            '\x1b[?6l\x1b[r' + // absolute origin and full scroll region first
+                '\x1b[5;21r' + // DECSTBM (upper+1;lower+1)
                 '\x1b[3;4H' + // CUP (cursorY+1;cursorX+1)
                 '\x1b[?25h' + // DECTCEM on
                 '\x1b[4h' + // IRM on

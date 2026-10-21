@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigService, Logger } from 'tabby-core'
 import type { Injector } from '@angular/core'
+import { Terminal } from '@xterm/headless'
 import { TmuxController, TmuxPaneSession } from './session'
 
 // tabby-terminal is an Angular partially-compiled package; loading it in Node
@@ -38,7 +39,7 @@ function createLoggerMock() {
 /** `list-panes -F` state response for pane %1 (see captureSnapshotForPane). */
 const STATE_LINE =
     'pane_id=%1\talternate_on=0\tcursor_x=8\tcursor_y=1\tscroll_region_upper=0\t' +
-    'scroll_region_lower=0\tcursor_flag=1\twrap_flag=1\tpane_height=24'
+    'scroll_region_lower=23\tcursor_flag=1\twrap_flag=1\tpane_height=24\tpane_width=80\thistory_size=0'
 
 describe('TmuxPaneSession', () => {
     function createSession() {
@@ -115,6 +116,85 @@ describe('TmuxPaneSession', () => {
         await expect(startPromise).resolves.toBeUndefined()
         // ... and the buffered live output is still delivered.
         expect(emitted.map((b) => b.toString())).toEqual(['early-live-output'])
+    })
+
+    it('refreshes the saved normal screen on return, and again after alternate resize', async () => {
+        const { session, controller } = createSession()
+        await startSession(session)
+        await session.screenBufferChanged('alternate')
+        expect(controller.ensurePaneSnapshot).not.toHaveBeenCalled()
+        // Even without a local resize, the saved normal grid may have been
+        // resized on the server before attach.
+        await session.screenBufferChanged('normal')
+        expect(controller.ensurePaneSnapshot).toHaveBeenCalledWith(5, true)
+        expect(controller.restorePaneHistory).toHaveBeenCalledTimes(2)
+
+        await session.screenBufferChanged('normal')
+        session.gridResized('normal')
+        await session.screenBufferChanged('normal')
+        expect(controller.ensurePaneSnapshot).toHaveBeenCalledTimes(1)
+
+        session.gridResized('alternate')
+        await session.screenBufferChanged('normal')
+        expect(controller.ensurePaneSnapshot).toHaveBeenCalledTimes(2)
+        expect(controller.restorePaneHistory).toHaveBeenCalledTimes(3)
+    })
+
+    it('replays only live output newer than a normal-screen refresh', async () => {
+        const { session, controller } = createSession()
+        const { emitted } = await startSession(session)
+        let finishCapture: (value: boolean) => void
+        vi.mocked(controller.ensurePaneSnapshot).mockImplementationOnce(
+            () => new Promise((resolve) => (finishCapture = resolve)),
+        )
+        vi.mocked(controller.restorePaneHistory).mockResolvedValueOnce(2)
+        const refreshing = session.screenBufferChanged('normal')
+        session.feedOutput(Buffer.from('already in snapshot'), 2)
+        session.feedOutput(Buffer.from('newer output'), 3)
+        expect(emitted).toEqual([])
+        finishCapture(true)
+        await refreshing
+        expect(emitted.map(String)).toEqual(['newer output'])
+    })
+
+    it('keeps live output when a normal-screen refresh fails', async () => {
+        const { session, controller } = createSession()
+        const { emitted } = await startSession(session)
+        vi.mocked(controller.ensurePaneSnapshot).mockRejectedValueOnce(new Error('capture failed'))
+        const refreshing = session.screenBufferChanged('normal')
+        session.feedOutput(Buffer.from('live shell'), 2)
+        await refreshing
+        expect(emitted.map(String)).toEqual(['live shell'])
+    })
+
+    it('buffers live output until the restored frame returns its sequence boundary', async () => {
+        const { session, controller } = createSession()
+        vi.mocked(controller.restorePaneHistory).mockImplementationOnce(async () => {
+            session.feedSnapshot(Buffer.from('frame'))
+            session.feedOutput(Buffer.from('covered output'), 2)
+            session.feedOutput(Buffer.from('new output'), 3)
+            await Promise.resolve()
+            return 2
+        })
+        const { emitted } = await startSession(session)
+        expect(emitted.map(String)).toEqual(['frame', 'new output'])
+    })
+
+    it('does not restore or flush output into a destroyed pane after capture completes', async () => {
+        const { session, controller } = createSession()
+        const { emitted } = await startSession(session)
+        let finishCapture: (value: boolean) => void
+        vi.mocked(controller.ensurePaneSnapshot).mockImplementationOnce(
+            () => new Promise((resolve) => (finishCapture = resolve)),
+        )
+        const refreshing = session.screenBufferChanged('normal')
+        session.feedOutput(Buffer.from('obsolete output'), 1)
+        await session.destroy()
+        finishCapture(true)
+        await refreshing
+        await session.screenBufferChanged('normal')
+        expect(emitted).toEqual([])
+        expect(controller.restorePaneHistory).toHaveBeenCalledTimes(1)
     })
 
     it('strips screen title sequences (ESC k ... ESC \\) from output', async () => {
@@ -702,10 +782,14 @@ describe('TmuxController', () => {
         )
         await waitForWrite(written, (w) => w.some((x) => x.startsWith('list-panes')))
         controller.gateway.executeData(Buffer.from('%begin 1 2 1\n%1 @0 1\n%end 2\n'))
-        await waitForWrite(written, (w) => w.some((x) => x.startsWith('capture-pane -peqJN -S-')))
-        controller.gateway.executeData(Buffer.from(historyPayload))
-        controller.gateway.executeData(Buffer.from('%begin 1 4 1\n%end 4\n'))
-        controller.gateway.executeData(Buffer.from(`%begin 1 5 1\n${stateStr}\n%end 5\n`))
+        const payloadLines = historyPayload.replace(/\r\n/g, '\n').split('\n')
+        const content = payloadLines.slice(1, -2).join('\n')
+        const historySize = Number(stateStr.match(/history_size=(\d+)/)?.[1] ?? 0)
+        const rows = content.split('\n')
+        await answerSnapshot(controller, written, rows.slice(historySize).join('\n'), {
+            stateLine: stateStr,
+            scrollback: rows.slice(0, historySize).join('\n'),
+        })
 
         // Discovery ends with the hostname query. Answer it so the response
         // queue stays aligned for the commands issued afterwards (a stale slot
@@ -722,30 +806,65 @@ describe('TmuxController', () => {
      * (captured from tmux 3.4 via a control-mode client).
      */
     function captureRowsPayload(rows: string[]): string {
-        return `%begin 1 3 1\r\n${rows.map((r) => `${r}\r\n`).join('')}\r\n%end 3\r\n`
+        return `%begin 1 3 1\r\n${rows.map((r) => `${r}\r\n`).join('')}%end 3\r\n`
     }
 
     /** `list-panes -F` state response with the given cursor/height. */
-    function stateLine(cursorX: number, cursorY: number, rows = 24): string {
+    function stateLine(cursorX: number, cursorY: number, rows = 24, historySize = 0): string {
         return (
             `pane_id=%1\talternate_on=0\tcursor_x=${cursorX}\tcursor_y=${cursorY}\t` +
             `scroll_region_upper=0\tscroll_region_lower=0\tcursor_flag=1\twrap_flag=1\t` +
-            `pane_height=${rows}`
+            `pane_height=${rows}\tpane_width=80\thistory_size=${historySize}`
         )
     }
 
-    /** Answer the three capture commands of one snapshot, in queue order. */
-    function answerSnapshot(
+    const answeredStateQueries = new WeakMap<TmuxController, number>()
+
+    /** Answer fenced captures in the same order as real Control Mode responses. */
+    async function answerSnapshot(
         controller: TmuxController,
-        history: string,
+        written: string[],
+        normalScreen: string,
         {
-            altHistory = '',
+            alternateScreen = null,
             stateLine: stateStr = STATE_LINE,
-        }: { altHistory?: string; stateLine?: string } = {},
-    ): void {
-        controller.gateway.executeData(Buffer.from(`%begin 1 3 1\n${history}\n%end 3\n`))
-        controller.gateway.executeData(Buffer.from(`%begin 1 4 1\n${altHistory}\n%end 4\n`))
-        controller.gateway.executeData(Buffer.from(`%begin 1 5 1\n${stateStr}\n%end 5\n`))
+            scrollback = '',
+        }: { alternateScreen?: string | null; stateLine?: string; scrollback?: string } = {},
+    ): Promise<void> {
+        const previous = answeredStateQueries.get(controller) ?? 0
+        const stateQueries = (writes: string[]) =>
+            writes.filter((write) => write.startsWith('list-panes -t %1 -F')).length
+        const reply = (text: string) =>
+            controller.gateway.executeData(Buffer.from(`%begin 1 99 1\n${text}\n%end 1 99 1\n`))
+        await waitForWrite(written, (writes) => stateQueries(writes) >= previous + 1)
+        reply(stateStr)
+        const captureCount = (writes: string[]) =>
+            writes.filter((write) => write.startsWith('capture-pane ')).length
+        const capturesBefore = captureCount(written)
+        const historySize = Number(stateStr.match(/history_size=(\d+)/)?.[1] ?? 0)
+        const expected = (historySize > 0 ? 2 : 0) + (alternateScreen !== null ? 2 : 1)
+        await waitForWrite(written, (writes) => captureCount(writes) >= capturesBefore + expected)
+        if (historySize > 0) {
+            reply(scrollback)
+            reply(scrollback + '\n' + normalScreen.split('\n')[0])
+        }
+        reply(normalScreen)
+        if (alternateScreen !== null) reply(alternateScreen)
+        await waitForWrite(written, (writes) => stateQueries(writes) >= previous + 2)
+        reply(stateStr)
+        answeredStateQueries.set(controller, previous + 2)
+    }
+
+    function attachTerminal(
+        session: TmuxPaneSession,
+        rows = 24,
+    ): {
+        terminal: Terminal
+        flush: () => Promise<void>
+    } {
+        const terminal = new Terminal({ cols: 80, rows, allowProposedApi: true })
+        session.output$.subscribe((data) => terminal.write(data))
+        return { terminal, flush: () => new Promise((resolve) => terminal.write('', resolve)) }
     }
 
     it('delivers output produced after the snapshot capture (issue #10)', async () => {
@@ -779,6 +898,47 @@ describe('TmuxController', () => {
         expect(rendered).not.toContain('attach-screen')
     })
 
+    it('covers output before a blank frame but retains later output from the same packet', async () => {
+        const { controller, written } = createController()
+        Object.assign(controller.gateway, { initialized: true, acceptNotifications: true })
+        controller.gateway.executeLine('%output %1 OLD-BEFORE-CLEAR')
+        const capturing = controller.ensurePaneSnapshot(1)
+        await waitForWrite(written, (writes) =>
+            writes.some((write) => write.startsWith('list-panes -t %1')),
+        )
+        controller.gateway.executeData(
+            Buffer.from(`%begin 1 1 1\n${stateLine(0, 0, 3)}\n%end 1 1 1\n`),
+        )
+        await waitForWrite(written, (writes) =>
+            writes.some((write) => write.startsWith('capture-pane')),
+        )
+        controller.gateway.executeData(
+            Buffer.from(
+                '%output %1 OLD-DURING-CAPTURE\n' +
+                    captureRowsPayload(['', '', '']) +
+                    '%output %1 NEW-AFTER-FRAME\n',
+            ),
+        )
+        await waitForWrite(
+            written,
+            (writes) => writes.filter((write) => write.startsWith('list-panes -t %1')).length === 2,
+        )
+        controller.gateway.executeData(
+            Buffer.from(`%begin 1 9 1\n${stateLine(0, 0, 3)}\n%end 1 9 1\n`),
+        )
+        expect(await capturing).toBe(true)
+
+        const session = new TmuxPaneSession(createLoggerMock(), controller, 1)
+        const { terminal, flush } = attachTerminal(session, 3)
+        const starting = session.start()
+        session.gridApplied()
+        await starting
+        await flush()
+        expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('NEW-AFTER-FRAME')
+        expect(terminal.buffer.active.getLine(1)?.translateToString(true)).toBe('')
+        terminal.dispose()
+    })
+
     it('captures a fresh snapshot when the pre-loaded one is gone (issue #10)', async () => {
         const { controller, written } = createController()
         controller.setClientSizePushed()
@@ -806,9 +966,9 @@ describe('TmuxController', () => {
         second.gridApplied()
         await waitForWrite(
             written,
-            (w) => w.filter((x) => x.startsWith('capture-pane -peqJN -S-')).length === 2,
+            (w) => w.filter((x) => x.startsWith('list-panes -t %1 -F')).length === 3,
         )
-        answerSnapshot(controller, 'fresh-screen')
+        await answerSnapshot(controller, written, 'fresh-screen')
         await secondStart
 
         const rendered = emitted.join('')
@@ -842,14 +1002,15 @@ describe('TmuxController', () => {
         await startPromise
 
         const rendered = emitted.join('')
-        // Every captured row is written — including the trailing blank one,
-        // which is a real screen row (not a trailing-newline artifact).
-        const text = rendered.slice(0, rendered.indexOf('\x1b'))
-        expect(text.endsWith('\r\n')).toBe(true)
-        expect(text.split('\r\n')).toHaveLength(rows.length + 1)
-        // The cursor is placed on tmux's own row (blank row 4), not at the end
-        // of "c" — otherwise the next output would be appended to it ("c…").
-        expect(rendered.endsWith('\x1b[4;1H')).toBe(true)
+        const { terminal, flush } = attachTerminal(session)
+        terminal.write(rendered)
+        await flush()
+        expect(terminal.buffer.active.baseY).toBe(0)
+        expect(terminal.buffer.active.cursorX).toBe(0)
+        expect(terminal.buffer.active.cursorY).toBe(3)
+        expect(terminal.buffer.active.getLine(2)?.translateToString(true)).toBe('c')
+        expect(terminal.buffer.active.getLine(23)?.translateToString(true)).toBe('')
+        terminal.dispose()
     })
 
     it('does not merge replayed output into the last snapshot line', async () => {
@@ -865,7 +1026,7 @@ describe('TmuxController', () => {
         await answerAttachDiscoveryRaw(
             controller,
             written,
-            stateLine(0, 23),
+            stateLine(0, 23, 24, 3),
             captureRowsPayload([...history, ...screen]),
         )
         await discover
@@ -883,16 +1044,15 @@ describe('TmuxController', () => {
         await startPromise
 
         const rendered = emitted.join('')
-        const text = rendered.slice(0, rendered.indexOf('\x1b'))
-        expect(text.split('\r\n')).toHaveLength(history.length + screen.length + 1)
-
-        // The replayed "897" must start on tmux's cursor row (the blank bottom
-        // row 24). Restoring it at the end of the "896" line instead produces
-        // "896897" on screen.
-        const marker = '\x1b[24;1H'
-        const markerIndex = rendered.lastIndexOf(marker)
-        expect(markerIndex).toBeGreaterThan(-1)
-        expect(rendered.slice(markerIndex + marker.length)).toBe('897\r\n')
+        const { terminal, flush } = attachTerminal(session)
+        terminal.write(rendered)
+        await flush()
+        const buffer = terminal.buffer.active
+        // The final CRLF scrolls once: 897 moves to the penultimate row.
+        expect(buffer.getLine(buffer.baseY + 21)?.translateToString(true)).toBe('896')
+        expect(buffer.getLine(buffer.baseY + 22)?.translateToString(true)).toBe('897')
+        expect(buffer.getLine(buffer.baseY + 23)?.translateToString(true)).toBe('')
+        terminal.dispose()
     })
 })
 

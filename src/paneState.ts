@@ -21,7 +21,11 @@ export interface PaneState {
     mouseStandardMode: boolean
     mouseButtonMode: boolean
     mouseAnyMode: boolean
-    /** Pane height in rows (from #{pane_height}); used for cursor restore math. */
+    originFlag?: boolean
+    mouseSgrMode?: boolean
+    columns?: number
+    historySize?: number
+    /** Pane height in rows (from #{pane_height}). */
     rows?: number
 }
 
@@ -153,6 +157,18 @@ export function parsePaneState(response: string, expectedPaneId: number): PaneSt
             case 'pane_height':
                 if (!isNaN(n)) state.rows = n
                 break
+            case 'pane_width':
+                if (!isNaN(n)) state.columns = n
+                break
+            case 'history_size':
+                if (!isNaN(n)) state.historySize = n
+                break
+            case 'origin_flag':
+                state.originFlag = n === 1
+                break
+            case 'mouse_sgr_flag':
+                state.mouseSgrMode = n === 1
+                break
         }
     }
     return state
@@ -160,12 +176,13 @@ export function parsePaneState(response: string, expectedPaneId: number): PaneSt
 
 /**
  * Build ANSI escape sequences for terminal mode state (without alternate
- * screen entry).  Used by both applyPaneState and pendingAltRestore.
+ * screen entry). Drawing the frame must finish before applying these modes.
  */
 export function buildModeSequences(state: PaneState, skipCursor = false): string {
     const csi = (s: string) => `\x1b[${s}`
     const esc = (s: string) => `\x1b${s}`
-    let seq = ''
+    // All positioning and tab-stop setup below uses absolute screen rows.
+    let seq = csi('?6l') + csi('r')
 
     // Set scroll region (DECSTBM)
     if (state.scrollRegionUpper > 0 || state.scrollRegionLower > 0) {
@@ -201,6 +218,9 @@ export function buildModeSequences(state: PaneState, skipCursor = false): string
     seq += state.mouseStandardMode ? csi('?1000h') : csi('?1000l')
     seq += state.mouseButtonMode ? csi('?1002h') : csi('?1002l')
     seq += state.mouseAnyMode ? csi('?1003h') : csi('?1003l')
+    if (state.mouseSgrMode !== undefined) {
+        seq += state.mouseSgrMode ? csi('?1006h') : csi('?1006l')
+    }
 
     // Tab stops (HTS / TBC) — skipped with the cursor setup when
     // skipCursor is set (cursor-moving sequences need the reset CUP).
@@ -216,7 +236,12 @@ export function buildModeSequences(state: PaneState, skipCursor = false): string
     // Reset cursor back to final position (tab stop setup moves it) —
     // skipped together with the earlier CUP when skipCursor is set.
     if (!skipCursor) {
-        seq += csi(`${state.cursorY + 1};${state.cursorX + 1}H`)
+        if (state.originFlag) {
+            seq += csi('?6h')
+            seq += csi(`${state.cursorY - state.scrollRegionUpper + 1};${state.cursorX + 1}H`)
+        } else {
+            seq += csi(`${state.cursorY + 1};${state.cursorX + 1}H`)
+        }
     }
 
     return seq

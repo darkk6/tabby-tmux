@@ -32,6 +32,31 @@ async function initGateway(gateway: TmuxGateway): Promise<void> {
 }
 
 describe('TmuxGateway sendCommand', () => {
+    it('marks a successful response before later output in the same packet', async () => {
+        const { gateway } = createGateway()
+        await initGateway(gateway)
+        const output: string[] = []
+        gateway.output$.subscribe(({ data }) => output.push(data.toString()))
+        let atBoundary: string[] = []
+        const capturing = gateway.sendCommand('capture-pane', 0, () => {
+            atBoundary = [...output]
+        })
+        gateway.executeData(
+            Buffer.from('%output %1 before\n%begin 1 2 1\nframe\n%end 1 2 1\n%output %1 after\n'),
+        )
+        expect(await capturing).toBe('frame')
+        expect(atBoundary).toEqual(['before'])
+        expect(output).toEqual(['before', 'after'])
+    })
+
+    it('does not mark a failed response as a captured frame', async () => {
+        const { gateway } = createGateway()
+        const onSuccess = vi.fn()
+        const capturing = gateway.sendCommand('capture-pane', 0, onSuccess)
+        gateway.executeData(Buffer.from('%begin 1 1 1\nfailed\n%error 1 1 1\n'))
+        await expect(capturing).rejects.toThrow('failed')
+        expect(onSuccess).not.toHaveBeenCalled()
+    })
     it('writes the command followed by CR', async () => {
         const { gateway, written } = createGateway()
         const p = gateway.sendCommand('list-windows')

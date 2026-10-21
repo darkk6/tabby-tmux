@@ -14,6 +14,7 @@ interface PendingCommand {
     reject: (error: Error) => void
     flags: number
     timestamp: number
+    onSuccess?: () => void
 }
 
 type PendingResponse = { type: 'command'; command: PendingCommand } | { type: 'direct-write' }
@@ -88,7 +89,7 @@ export class TmuxGateway {
     /**
      * Send a single command and wait for response
      */
-    async sendCommand(command: string, flags = 0): Promise<string> {
+    async sendCommand(command: string, flags = 0, onSuccess?: () => void): Promise<string> {
         if (this.detachSent || this.disconnected) {
             throw new Error('Gateway disconnected')
         }
@@ -101,6 +102,7 @@ export class TmuxGateway {
                 reject,
                 flags,
                 timestamp: Date.now(),
+                onSuccess,
             }
             this.responseQueue.push({ type: 'command', command: cmd })
             this.write(command + '\r')
@@ -344,6 +346,9 @@ export class TmuxGateway {
             if (isError && !(this.currentCommand.flags & TMUX_COMMAND_TOLERATE_ERRORS)) {
                 this.currentCommand.reject(new Error(response))
             } else {
+                // Run at the protocol boundary, before processing subsequent
+                // %output lines in the same PTY chunk (a promise is too late).
+                if (!isError) this.currentCommand.onSuccess?.()
                 this.currentCommand.resolve(response)
             }
             this.currentCommand = null
