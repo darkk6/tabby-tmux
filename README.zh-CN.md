@@ -17,6 +17,40 @@
 
 ![tmux-pane](./doc/img/pane.png)
 
+## 环境要求
+
+终端 session 所在的机器需要安装 **tmux 3.1 或更新版本**。通过 SSH 连接时，需要升级的是远程主机上的 tmux。本插件使用了 tmux 3.1 才加入的 `capture-pane -N` 参数；3.0a 等旧版本可能在打开 pane 时显示 `capture-pane` usage 错误。
+
+可通过以下命令检查已安装的版本：
+
+```bash
+tmux -V
+```
+
+### Linux：使用静态二进制升级
+
+如果系统软件源提供的 tmux 版本较旧，可以使用第三方项目 [build-static-tmux Releases](https://github.com/mjakob-gh/build-static-tmux/releases) 提供的 Linux 预编译静态二进制，无需自行编译 tmux 及其依赖。
+
+选择与机器架构（通过 `uname -m` 查看）匹配的较新稳定版本，下载并按需解压，将二进制以 `tmux` 为名安装到 `PATH` 中的目录。例如，将下面的 `/path/to/downloaded/tmux` 替换为下载所得二进制的实际路径：
+
+```bash
+mkdir -p "$HOME/.local/bin"
+install -m 755 /path/to/downloaded/tmux "$HOME/.local/bin/tmux"
+export PATH="$HOME/.local/bin:$PATH"
+command -v tmux
+tmux -V
+```
+
+将 `export PATH=...` 这一行加入所用 shell 的启动配置文件，确保新开的终端 session 也使用升级后的二进制。
+
+升级可执行文件不会升级已经运行的 tmux server。可通过以下命令检查所连接的 server 版本：
+
+```bash
+tmux display-message -p '#{version}'
+```
+
+如果 server 仍低于 3.1，请先保存工作并结束其中 session 内的任务，再使用新版本二进制重启 server，之后重新进入 tmux 模式。
+
 ## 安装
 
 ### 通过 Tabby 设置界面

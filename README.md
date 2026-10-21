@@ -17,6 +17,40 @@ A [Tabby](https://tabby.sh/) plugin that provides tmux Control Mode integration,
 
 ![tmux-pane](./doc/img/pane.png)
 
+## Requirements
+
+**tmux 3.1 or later** must be installed on the machine where the terminal session runs. For SSH connections, this means the remote host. The plugin uses `capture-pane -N`, which was added in tmux 3.1; older versions such as 3.0a can display `capture-pane` usage errors when opening panes.
+
+Check the installed version with:
+
+```bash
+tmux -V
+```
+
+### Linux: upgrading with a static binary
+
+If your distribution's package repository provides an older tmux, you can use a prebuilt Linux static binary from the third-party [build-static-tmux Releases](https://github.com/mjakob-gh/build-static-tmux/releases) instead of compiling tmux and its dependencies yourself.
+
+Choose a recent stable version matching your machine's architecture (`uname -m`), download and extract it if needed, then install the binary as `tmux` in a directory on your `PATH`. For example, replace `/path/to/downloaded/tmux` below with the downloaded binary's actual path:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+install -m 755 /path/to/downloaded/tmux "$HOME/.local/bin/tmux"
+export PATH="$HOME/.local/bin:$PATH"
+command -v tmux
+tmux -V
+```
+
+Add the `export PATH=...` line to your shell's startup file so new terminal sessions also use the upgraded binary.
+
+Upgrading the executable does not upgrade an already-running tmux server. Check the version of the server you are connecting to with:
+
+```bash
+tmux display-message -p '#{version}'
+```
+
+If the server is still older than 3.1, save your work and finish the tasks in its sessions before restarting it with the new binary, then re-enter tmux mode.
+
 ## Installation
 
 ### Via Tabby Settings
