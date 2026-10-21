@@ -128,6 +128,14 @@ pnpm run watch  # watch mode
 TABBY_PLUGINS=$(pwd) tabby --debug
 ```
 
+Run the restoration performance benchmarks (requires local tmux ≥ 3.1 and Vim):
+
+```bash
+pnpm run test:performance
+```
+
+The benchmarks check transfer volume, restoration time, and screen correctness with large histories, multiple windows, continuous output, and Vim. See the [performance analysis](doc/FIX_ATTACH_PERFORMANCE.md) for reproduction steps, budgets, and measurements.
+
 ## License
 
 MIT

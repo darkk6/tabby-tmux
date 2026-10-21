@@ -18,6 +18,12 @@ interface PendingCommand {
 }
 
 type PendingResponse = { type: 'command'; command: PendingCommand } | { type: 'direct-write' }
+
+export interface TmuxCommand {
+    command: string
+    flags?: number
+    onSuccess?: () => void
+}
 /**
  * TmuxGateway - Protocol layer for tmux control mode
  *
@@ -90,10 +96,34 @@ export class TmuxGateway {
      * Send a single command and wait for response
      */
     async sendCommand(command: string, flags = 0, onSuccess?: () => void): Promise<string> {
+        const [response] = await this.sendCommands([{ command, flags, onSuccess }])
+        return response
+    }
+
+    /**
+     * Queue independent commands in one transport write. In particular, a
+     * snapshot's closing state query must reach tmux alongside its captures,
+     * rather than after megabytes of capture output have crossed the network.
+     * Use separate lines: a failure in a semicolon sequence skips later commands
+     * and would leave their response slots unmatched.
+     */
+    async sendCommands(commands: TmuxCommand[]): Promise<string[]> {
         if (this.detachSent || this.disconnected) {
             throw new Error('Gateway disconnected')
         }
+        const responses = commands.map(({ command, flags = 0, onSuccess }) =>
+            this.queueCommand(command, flags, onSuccess),
+        )
+        const result = Promise.all(responses)
+        try {
+            if (commands.length) this.write(commands.map(({ command }) => command + '\r').join(''))
+        } catch (error) {
+            this.dispose(error instanceof Error ? error : new Error(String(error)))
+        }
+        return result
+    }
 
+    private queueCommand(command: string, flags: number, onSuccess?: () => void): Promise<string> {
         const original = new Promise<string>((resolve, reject) => {
             const cmd: PendingCommand = {
                 id: this.nextCommandId++,
@@ -105,7 +135,6 @@ export class TmuxGateway {
                 onSuccess,
             }
             this.responseQueue.push({ type: 'command', command: cmd })
-            this.write(command + '\r')
             this.log.debug(`Sent command: ${command}`)
         })
 
@@ -139,7 +168,7 @@ export class TmuxGateway {
      * responses aligned even when the user types while a command is pending.
      */
     sendKeys(data: Buffer, paneId: number): void {
-        if (this.disconnected) return
+        if (this.detachSent || this.disconnected) return
 
         const hex = data.toString('hex')
         if (hex.length > 0) {
@@ -159,7 +188,7 @@ export class TmuxGateway {
      * Request detach
      */
     detach(): void {
-        if (!this.detachSent) {
+        if (!this.detachSent && !this.disconnected) {
             this.write('detach\r')
             this.detachSent = true
         }
@@ -478,8 +507,23 @@ export class TmuxGateway {
     private parseExit(line: string): void {
         // %exit or %exit <reason>
         const reason = line.replace(/^%exit\s*/, '')
-        this.exit$.next(reason)
         this.disconnected = true
+        this.exit$.next(reason)
+    }
+
+    /** Stop local work when the UI disconnects; detach itself is already written. */
+    dispose(error = new Error('Gateway disconnected')): void {
+        this.disconnected = true
+        this.currentCommand?.reject(error)
+        this.currentCommand = null
+        for (const response of this.responseQueue) {
+            if (response.type === 'command') response.command.reject(error)
+        }
+        this.responseQueue = []
+        this.currentResponse = []
+        this.inResponseBlock = false
+        this.acceptNotifications = false
+        this.lineBuffer = ''
     }
 
     // --- Utility Methods ---

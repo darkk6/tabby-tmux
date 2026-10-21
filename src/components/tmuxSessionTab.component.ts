@@ -526,6 +526,9 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
                         this.logger.info(`Adding new window @${event.windowId} to map`)
                         this.windowPaneTabs.set(event.windowId, new Map())
                     }
+                    // Batch discovery publishes metadata before capturing history.
+                    // Mount only when that window's complete layout is ready.
+                    if (event.data?.deferSwitch) break
                     // Switch to a new window if:
                     // 1. No active window yet (initial attach), OR
                     // 2. This is a genuinely new window created after attach
@@ -598,6 +601,15 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
                 // For non-active windows, we save the layout but don't rebuild
                 // the tree (it will be rebuilt when the user switches to it).
                 if (event.windowId !== undefined && event.data?.layout) {
+                    if (
+                        this._initialized &&
+                        this.activeWindowId === null &&
+                        (this.controller?.getActiveWindowId() === event.windowId ||
+                            this.controller?.getActiveWindowId() === null)
+                    ) {
+                        await this.switchToWindow(event.windowId)
+                        break
+                    }
                     if (event.windowId === this.activeWindowId) {
                         this.logger.info(`Syncing layout for active window @${event.windowId}`)
                         await this.syncLayout(

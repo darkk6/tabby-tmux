@@ -3,7 +3,7 @@ import { BaseSession } from 'tabby-terminal'
 import { Logger, ConfigService } from 'tabby-core'
 import { createConditionalLogger, ConditionalLogger } from './logHelper'
 import { Injector } from '@angular/core'
-import { TmuxGateway, TMUX_COMMAND_TOLERATE_ERRORS } from './gateway'
+import { TmuxCommand, TmuxGateway, TMUX_COMMAND_TOLERATE_ERRORS } from './gateway'
 import { parsePaneState } from './paneState'
 import { buildSnapshotRestore, PaneSnapshot } from './paneSnapshot'
 import {
@@ -351,6 +351,11 @@ export class TmuxController {
     private paneOutputSequences = new Map<number, number>()
     /** Pre-loaded history from batch discovery (iTerm2-style). */
     private pendingSnapshots = new Map<number, PaneSnapshot>()
+    /** A failed discovery capture is consumed once by start(), not retried immediately. */
+    private failedSnapshots = new Set<number>()
+    private snapshotQueue: Promise<void> = Promise.resolve()
+    private snapshotCaptures = new Map<number, Promise<PaneSnapshot | null>>()
+    private destroyed = false
     private sessionName = ''
     /** Hostname of the machine running the tmux server. */
     private hostName = ''
@@ -722,7 +727,11 @@ export class TmuxController {
                             layout,
                             panes: new Set(),
                         })
-                        this.events.next({ type: 'window-add', windowId })
+                        this.events.next({
+                            type: 'window-add',
+                            windowId,
+                            data: { deferSwitch: true },
+                        })
                     } else {
                         const state = this.windowStates.get(windowId)!
                         state.name = windowName
@@ -784,7 +793,11 @@ export class TmuxController {
                             panes: new Set(),
                         }
                         this.windowStates.set(windowId, windowState)
-                        this.events.next({ type: 'window-add', windowId })
+                        this.events.next({
+                            type: 'window-add',
+                            windowId,
+                            data: { deferSwitch: true },
+                        })
                     }
                     windowState.panes.add(paneId)
 
@@ -820,17 +833,16 @@ export class TmuxController {
                 }
             }
 
-            // Step 4: Emit pane-add events — history is now pre-loaded
-            for (const { paneId, windowId } of newPaneIds) {
-                this.log.info(`Discovered pane %${paneId} in window @${windowId}`)
-                this.events.next({ type: 'pane-add', paneId, windowId })
-            }
-
-            // Step 5: Emit layout-change for all discovered windows so the UI
+            // Captured windows were published progressively. Refresh layouts
+            // of existing windows too, without duplicating the capture events.
+            // Emit layout-change for all discovered windows so the UI
             // can build the SplitContainer tree. Without this, syncLayout()
             // never runs and panes remain registered but unmounted.
             for (const windowState of this.windowStates.values()) {
-                if (windowState.layout) {
+                if (
+                    windowState.layout &&
+                    !newPaneIds.some((pane) => pane.windowId === windowState.id)
+                ) {
                     this.events.next({
                         type: 'layout-change',
                         windowId: windowState.id,
@@ -939,7 +951,13 @@ export class TmuxController {
             )
 
             // Capture history + state for new panes (same as discoverWindowsAndPanes Step 3)
-            const captured = await this.capturePaneSnapshots(newPaneIds)
+            if (this.hasClientSizePushed) {
+                await this.discoverPaneTitles(
+                    windowId,
+                    new Set(newPaneIds.map(({ paneId }) => paneId)),
+                )
+            }
+            const captured = await this.capturePaneSnapshots(newPaneIds, false)
             if (!captured) {
                 // Client size not pushed yet (out-of-order %layout-change before
                 // the first refresh-client). Roll back so a later discover
@@ -962,15 +980,6 @@ export class TmuxController {
                 // (after the size push) re-adds these panes and emits both
                 // pane-add and layout-change.
                 return
-            } else {
-                await this.discoverPaneTitles(
-                    windowId,
-                    new Set(newPaneIds.map(({ paneId }) => paneId)),
-                )
-                // Emit pane-add events — history and title metadata are now pre-loaded
-                for (const { paneId, windowId: wid } of newPaneIds) {
-                    this.events.next({ type: 'pane-add', paneId, windowId: wid })
-                }
             }
         }
 
@@ -1047,6 +1056,7 @@ export class TmuxController {
      */
     private async capturePaneSnapshots(
         paneIds: Array<{ paneId: number; windowId: number }>,
+        publishLayouts = true,
     ): Promise<boolean> {
         // Guard: capturing history/screen before any client size has been
         // pushed (refresh-client -C) uses tmux's stale pre-attach window size,
@@ -1065,19 +1075,61 @@ export class TmuxController {
             return false
         }
 
-        await Promise.all(
-            paneIds.map(async ({ paneId }) => {
-                const snapshot = await this.captureSnapshotForPane(paneId)
-                if (snapshot) {
-                    this.pendingSnapshots.set(paneId, snapshot)
-                }
-            }),
+        // One history transfer at a time bounds queued bytes and command timers.
+        // Recover the visible window first, and publish it before background windows.
+        const windows = new Map<number, number[]>()
+        for (const { paneId, windowId } of paneIds) {
+            if (!windows.has(windowId)) windows.set(windowId, [])
+            windows.get(windowId).push(paneId)
+        }
+        const ordered = [...windows].sort(
+            ([a], [b]) => Number(b === this.activeWindowId) - Number(a === this.activeWindowId),
         )
+        for (const [windowId, panes] of ordered) {
+            for (const paneId of panes) {
+                if (this.destroyed) return false
+                const snapshot = await this.captureSnapshotForPane(paneId)
+                if (this.destroyed) return false
+                if (snapshot) this.pendingSnapshots.set(paneId, snapshot)
+                else this.failedSnapshots.add(paneId)
+            }
+            // Do not expose a partial split layout: syncLayout would create the
+            // remaining tabs before their snapshots were captured.
+            for (const paneId of panes) {
+                this.events.next({ type: 'pane-add', paneId, windowId })
+            }
+            const window = this.windowStates.get(windowId)
+            if (publishLayouts && window?.layout) {
+                this.events.next({
+                    type: 'layout-change',
+                    windowId,
+                    data: {
+                        layout: window.layout,
+                        visibleLayout: window.visibleLayout,
+                        zoomed: window.zoomedPaneId !== undefined,
+                    },
+                })
+            }
+        }
         return true
     }
 
     /** Capture scrollback and both screens, rejecting mixed-mode/size snapshots. */
     private async captureSnapshotForPane(paneId: number): Promise<PaneSnapshot | null> {
+        const existing = this.snapshotCaptures.get(paneId)
+        if (existing) return existing
+        const capturing = this.snapshotQueue
+            .then(() => (this.destroyed ? null : this.runCaptureSnapshotForPane(paneId)))
+            .finally(() => this.snapshotCaptures.delete(paneId))
+        this.snapshotCaptures.set(paneId, capturing)
+        this.snapshotQueue = capturing.then(
+            () => undefined,
+            () => undefined,
+        )
+        return capturing
+    }
+
+    private async runCaptureSnapshotForPane(paneId: number): Promise<PaneSnapshot | null> {
         const stateFormat = [
             'pane_id=#{pane_id}',
             'alternate_on=#{alternate_on}',
@@ -1103,10 +1155,8 @@ export class TmuxController {
             'pane_height=#{pane_height}',
             'history_size=#{history_size}',
         ].join('\t')
-        const readState = async () => {
-            const response = await this.gateway.sendCommand(
-                `list-panes -t %${paneId} -F "${stateFormat}"`,
-            )
+        const stateCommand = `list-panes -t %${paneId} -F "${stateFormat}"`
+        const parseState = (response: string) => {
             const state = parsePaneState(response, paneId)
             if (
                 state.paneId !== paneId ||
@@ -1125,52 +1175,62 @@ export class TmuxController {
         let failure: unknown
         for (let attempt = 0; attempt < 3; attempt++) {
             try {
-                const state = await readState()
+                const state = parseState(await this.gateway.sendCommand(stateCommand))
+                if (this.destroyed) return null
                 let outputSequence = this.paneOutputSequences.get(paneId) ?? 0
                 const markFrameBoundary = () => {
                     outputSequence = this.paneOutputSequences.get(paneId) ?? 0
                 }
                 // -E-1 with no history clamps to visible row 0. Skip it when
                 // history_size is zero or the first screen row is duplicated.
-                const [scrollback, historyThroughRow0, normalScreen, alternateScreen] =
-                    await Promise.all([
-                        state.historySize > 0
-                            ? this.gateway.sendCommand(`capture-pane -peJN -S- -E-1 -t %${paneId}`)
-                            : Promise.resolve(''),
-                        state.historySize > 0
-                            ? this.gateway.sendCommand(`capture-pane -peJN -S- -E0 -t %${paneId}`)
-                            : Promise.resolve(''),
-                        this.gateway.sendCommand(
-                            `capture-pane -peJN ${state.alternateOn ? '-a ' : ''}-S0 -t %${paneId}`,
-                            0,
-                            state.alternateOn ? undefined : markFrameBoundary,
-                        ),
-                        state.alternateOn
-                            ? this.gateway.sendCommand(
-                                  `capture-pane -peN -S0 -t %${paneId}`,
-                                  0,
-                                  markFrameBoundary,
-                              )
-                            : Promise.resolve(null),
-                    ])
-                const after = await readState()
+                const commands: TmuxCommand[] = []
+                if (state.historySize > 0) {
+                    commands.push(
+                        { command: `capture-pane -peJN -S- -E-1 -t %${paneId}` },
+                        // Only the two physical rows around the boundary are
+                        // needed to detect a soft wrap; never read all history twice.
+                        { command: `capture-pane -peJN -S-1 -E0 -t %${paneId}` },
+                    )
+                }
+                commands.push({
+                    command: `capture-pane -peJN ${state.alternateOn ? '-a ' : ''}-S0 -t %${paneId}`,
+                    onSuccess: state.alternateOn ? undefined : markFrameBoundary,
+                })
+                if (state.alternateOn)
+                    commands.push({
+                        command: `capture-pane -peN -S0 -t %${paneId}`,
+                        onSuccess: markFrameBoundary,
+                    })
+                commands.push({ command: stateCommand })
+                const responses = await this.gateway.sendCommands(commands)
+                const scrollback = state.historySize > 0 ? responses.shift() : ''
+                const boundary = state.historySize > 0 ? responses.shift() : ''
+                const normalScreen = responses.shift()
+                const alternateScreen = state.alternateOn ? responses.shift() : null
+                const after = parseState(responses.shift())
                 if (
-                    JSON.stringify(state) !== JSON.stringify(after) ||
-                    (state.historySize > 0 && !historyThroughRow0.startsWith(scrollback))
+                    state.columns !== after.columns ||
+                    state.rows !== after.rows ||
+                    state.alternateOn !== after.alternateOn ||
+                    (state.historySize === 0) !== (after.historySize === 0)
                 ) {
-                    throw new Error(`Pane %${paneId} changed while capturing its snapshot`)
+                    failure = new Error(`Pane %${paneId} changed size or screen while capturing`)
+                    continue
                 }
                 return {
                     scrollback,
                     normalScreen,
                     alternateScreen,
-                    historyJoinsScreen:
-                        state.historySize > 0 && !historyThroughRow0.startsWith(scrollback + '\n'),
-                    state,
+                    historyJoinsScreen: state.historySize > 0 && !boundary.includes('\n'),
+                    state: after,
                     outputSequence,
                 }
             } catch (error) {
+                if (this.destroyed) return null
                 failure = error
+                // A timeout does not cancel tmux's queued work. Retrying the
+                // same large captures only adds more data behind that backlog.
+                break
             }
         }
         this.logger.warn(`Failed to capture snapshot for pane %${paneId}:`, failure)
@@ -1201,6 +1261,8 @@ export class TmuxController {
      * output must NOT be treated as snapshot-covered.
      */
     async ensurePaneSnapshot(paneId: number, force = false): Promise<boolean> {
+        if (this.destroyed) return false
+        if (!force && this.failedSnapshots.delete(paneId)) return false
         if (!force && this.pendingSnapshots.has(paneId)) {
             return true
         }
@@ -1208,6 +1270,7 @@ export class TmuxController {
         const session = this.paneSessions.get(paneId)
 
         const snapshot = await this.captureSnapshotForPane(paneId)
+        if (this.destroyed) return false
         if (session && this.paneSessions.get(paneId) !== session) return false
         if (!snapshot) {
             this.log.warn(`No snapshot available for pane %${paneId} at restore time`)
@@ -1250,6 +1313,7 @@ export class TmuxController {
         this.paneSessions.delete(paneId)
         this.pendingPaneOutput.delete(paneId)
         this.pendingSnapshots.delete(paneId)
+        this.failedSnapshots.delete(paneId)
     }
 
     /**
@@ -1404,6 +1468,10 @@ export class TmuxController {
     // --- Lifecycle ---
 
     async destroy(): Promise<void> {
+        this.destroyed = true
+        this.gateway.dispose()
+        this.pendingSnapshots.clear()
+        this.failedSnapshots.clear()
         // Close all pane sessions locally. Pane destruction must never issue
         // kill-pane; only an explicit user close action may do that.
         for (const [_paneId, session] of this.paneSessions) {

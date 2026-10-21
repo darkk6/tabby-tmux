@@ -55,6 +55,7 @@ type ControllerEvent = {
     type: string
     paneId?: number
     windowId?: number
+    data?: unknown
 }
 
 type TestController = {
@@ -165,6 +166,29 @@ describe('TmuxSessionTabComponent title ownership', () => {
         const { component } = createSessionTab()
 
         expect(component.disableDynamicTitle).toBe(true)
+    })
+
+    it('mounts the ready active window without waiting for background discovery', async () => {
+        const { component, controller } = createSessionTab()
+        const internal = component as SessionTabTestInstance & {
+            _initialized: boolean
+            eventQueue: Promise<void>
+        }
+        component.activeWindowId = null
+        internal._initialized = true
+        component.ngOnInit()
+        const switching = vi.spyOn(component, 'switchToWindow').mockResolvedValue(undefined)
+        controller.events.next({ type: 'window-add', windowId: 2, data: { deferSwitch: true } })
+        controller.events.next({
+            type: 'layout-change',
+            windowId: 2,
+            data: { layout: 'background' },
+        })
+        await internal.eventQueue
+        expect(switching).not.toHaveBeenCalled()
+        controller.events.next({ type: 'layout-change', windowId: 1, data: { layout: 'active' } })
+        await internal.eventQueue
+        expect(switching).toHaveBeenCalledWith(1)
     })
 
     it('renders the configured window, pane, session and host variables', () => {

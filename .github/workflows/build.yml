@@ -32,5 +32,34 @@ jobs:
             - name: Install dependencies
               run: pnpm install --frozen-lockfile
 
+            - name: Check source and unit tests
+              run: |
+                  pnpm run lint
+                  pnpm run typecheck
+                  pnpm run format:check
+                  pnpm test
+
+            - name: Install integration test tools
+              run: sudo apt-get update && sudo apt-get install -y tmux vim htop
+
+            - name: Test real tmux restoration
+              env:
+                  TMUX_TEST_BINARY: tmux
+                  HTOP_TEST_BINARY: htop
+              run: pnpm run test:integration
+
+            - name: Check snapshot performance budgets
+              env:
+                  TMUX_BENCH_OUTPUT: ${{ runner.temp }}/snapshot-benchmark.jsonl
+              run: pnpm run test:performance
+
+            - name: Save benchmark measurements
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: snapshot-benchmark
+                  path: ${{ runner.temp }}/snapshot-benchmark.jsonl
+                  if-no-files-found: ignore
+
             - name: Build
               run: pnpm run build

@@ -49,10 +49,182 @@ function setup(respond: (command: string) => string | Promise<string>) {
             onSuccess?.()
             return response
         })
+    vi.spyOn(controller.gateway, 'sendCommands').mockImplementation((requests) =>
+        Promise.all(
+            requests.map(({ command, flags, onSuccess }) =>
+                controller.gateway.sendCommand(command, flags, onSuccess),
+            ),
+        ),
+    )
     return { controller, commands, logger }
 }
 
 describe('pane snapshot capture', () => {
+    it('accepts cursor/history changes from normal output without retransmitting large history', async () => {
+        let reads = 0
+        const { controller, commands } = setup((command) => {
+            if (command.startsWith('list-panes')) {
+                return state(false, ++reads === 1 ? 50000 : 50001).replace(
+                    'cursor_x=0',
+                    `cursor_x=${reads}`,
+                )
+            }
+            if (command.includes('-S-1')) return 'history tail\nfirst row'
+            if (command.includes('-S- ')) return 'full history'
+            return 'first row\nlast row\n'
+        })
+        expect(await controller.ensurePaneSnapshot(1)).toBe(true)
+        expect(commands.mock.calls.filter(([command]) => command.includes('-S- '))).toHaveLength(1)
+        expect(reads).toBe(2)
+        const session = new TmuxPaneSession({ warn: vi.fn() } as unknown as Logger, controller, 1)
+        const output: string[] = []
+        session.output$.subscribe((data) => output.push(data.toString()))
+        await controller.restorePaneHistory(1)
+        expect(output.join('')).toContain('\x1b[1;3H')
+    })
+
+    it.each([true, false])(
+        'detects history/screen soft wrap=%s from only two boundary rows',
+        async (wrapped) => {
+            const { controller, commands } = setup((command) => {
+                if (command.startsWith('list-panes')) return state(false, 50000)
+                if (command.includes('-S-1')) return wrapped ? 'tailfirst' : 'tail\nfirst'
+                if (command.includes('-S- ')) return 'history tail'
+                return 'first\nsecond\n'
+            })
+            await controller.ensurePaneSnapshot(1)
+            const session = new TmuxPaneSession(
+                { warn: vi.fn() } as unknown as Logger,
+                controller,
+                1,
+            )
+            const output: string[] = []
+            session.output$.subscribe((data) => output.push(data.toString()))
+            await controller.restorePaneHistory(1)
+            expect(output.join('')).toContain(
+                wrapped ? 'history tail\x1b[0m\x1b[0mfirst' : 'history tail\x1b[0m\r\n\x1b[0mfirst',
+            )
+            expect(commands.mock.calls.some(([command]) => command.includes('-S- -E0'))).toBe(false)
+        },
+    )
+
+    it('does not enqueue more captures after a transport timeout', async () => {
+        const { controller, commands } = setup((command) => {
+            if (command.startsWith('list-panes')) return state(false, 50000)
+            throw new Error('Command timed out after 30000ms')
+        })
+        expect(await controller.ensurePaneSnapshot(1)).toBe(false)
+        expect(commands.mock.calls.filter(([command]) => command.includes('-S- '))).toHaveLength(1)
+    })
+
+    it('serializes concurrent captures and shares concurrent requests for one pane', async () => {
+        let release: (value: string) => void
+        let paused = true
+        const { controller, commands } = setup((command) => {
+            const pane = Number(command.match(/%([12])/)?.[1])
+            if (command.startsWith('list-panes'))
+                return state().replace('pane_id=%1', `pane_id=%${pane}`)
+            if (pane === 1 && paused)
+                return new Promise((resolve) => {
+                    release = resolve
+                })
+            return 'frame\n\n'
+        })
+        const first = controller.ensurePaneSnapshot(1)
+        const shared = controller.ensurePaneSnapshot(1)
+        const second = controller.ensurePaneSnapshot(2)
+        await vi.waitFor(() => expect(release).toBeDefined())
+        expect(commands.mock.calls.some(([command]) => command.includes('%2'))).toBe(false)
+        paused = false
+        release('frame\n\n')
+        expect(await Promise.all([first, shared, second])).toEqual([true, true, true])
+        expect(
+            commands.mock.calls.filter(([command]) => command === 'capture-pane -peJN -S0 -t %1'),
+        ).toHaveLength(1)
+    })
+
+    it('restores the active window before a slow background window', async () => {
+        let releaseBackground: (value: string) => void
+        const { controller } = setup((command) => {
+            if (command.startsWith('list-windows'))
+                return '@0 background 0 0 aa,12x3,0,0,1 - aa,12x3,0,0,1\n@1 active 1 1 aa,12x3,0,0,2 * aa,12x3,0,0,2'
+            if (command.startsWith('list-panes -s')) return '%1 @0 1\n%2 @1 1'
+            if (command.startsWith('list-panes'))
+                return state().replace(
+                    'pane_id=%1',
+                    command.includes('%2') ? 'pane_id=%2' : 'pane_id=%1',
+                )
+            if (command.startsWith('capture') && command.includes('%1'))
+                return new Promise((resolve) => {
+                    releaseBackground = resolve
+                })
+            return 'frame\n\n'
+        })
+        controller.setClientSizePushed()
+        const events: string[] = []
+        controller.events.subscribe((event) => events.push(`${event.type}:${event.windowId}`))
+        const discovering = controller.refreshPanes()
+        await vi.waitFor(() => expect(releaseBackground).toBeDefined())
+        expect(events).toContain('pane-add:1')
+        expect(events).toContain('layout-change:1')
+        expect(events).not.toContain('pane-add:0')
+        releaseBackground('frame\n\n')
+        await discovering
+        expect(events).toContain('layout-change:0')
+    })
+
+    it('does not immediately repeat a failed discovery capture at pane start', async () => {
+        const { controller, commands } = setup((command) => {
+            if (command.startsWith('list-windows'))
+                return '@0 main 0 1 aa,12x3,0,0,1 * aa,12x3,0,0,1'
+            if (command.startsWith('list-panes -s')) return '%1 @0 1'
+            if (command.startsWith('list-panes')) return state()
+            if (command.startsWith('capture')) throw new Error('capture failed')
+            return ''
+        })
+        controller.setClientSizePushed()
+        await controller.refreshPanes()
+        const before = commands.mock.calls.length
+        const session = new TmuxPaneSession({ warn: vi.fn() } as unknown as Logger, controller, 1)
+        const starting = session.start()
+        session.gridApplied()
+        await starting
+        expect(commands).toHaveBeenCalledTimes(before)
+    })
+
+    it('publishes split panes together after every snapshot in that window is ready', async () => {
+        let releaseSecond: (value: string) => void
+        const { controller } = setup((command) => {
+            if (command.startsWith('list-windows'))
+                return '@0 main 0 1 aa,12x3,0,0{6x3,0,0,1,5x3,7,0,2} * aa,12x3,0,0{6x3,0,0,1,5x3,7,0,2}'
+            if (command.startsWith('list-panes -s')) return '%1 @0 1\n%2 @0 0'
+            if (command.startsWith('list-panes'))
+                return state().replace(
+                    'pane_id=%1',
+                    command.includes('%2') ? 'pane_id=%2' : 'pane_id=%1',
+                )
+            if (command.startsWith('capture') && command.includes('%2'))
+                return new Promise((resolve) => {
+                    releaseSecond = resolve
+                })
+            return 'frame\n\n'
+        })
+        controller.setClientSizePushed()
+        const events: string[] = []
+        controller.events.subscribe((event) => events.push(event.type))
+        const discovering = controller.refreshPanes()
+        await vi.waitFor(() => expect(releaseSecond).toBeDefined())
+        expect(controller.hasPendingSnapshot(1)).toBe(true)
+        expect(events).not.toContain('pane-add')
+        expect(events).not.toContain('layout-change')
+        releaseSecond('frame\n\n')
+        await discovering
+        expect(events.filter((type) => type === 'pane-add' || type === 'layout-change')).toEqual([
+            'pane-add',
+            'pane-add',
+            'layout-change',
+        ])
+    })
     it('does not capture nonexistent history or request -a in normal mode', async () => {
         const { controller, commands } = setup((command) =>
             command.startsWith('list-panes') ? state() : 'shell\n\n',
@@ -140,7 +312,7 @@ describe('pane snapshot capture', () => {
     it('rejects invalid or missing pane geometry instead of rendering a fake frame', async () => {
         const { controller, commands } = setup(() => 'pane_id=%1\tpane_width=\tpane_height=')
         expect(await controller.ensurePaneSnapshot(1)).toBe(false)
-        expect(commands).toHaveBeenCalledTimes(3)
+        expect(commands).toHaveBeenCalledTimes(1)
     })
 
     it("does not give an unmounted pane's in-flight snapshot to its replacement", async () => {

@@ -24,6 +24,7 @@
         "format:check": "prettier --check .",
         "test": "vitest run",
         "test:integration": "vitest run src/paneSnapshot.integration.spec.ts",
+        "test:performance": "vitest run --config vitest.performance.config.mjs",
         "test:watch": "vitest"
     },
     "files": [

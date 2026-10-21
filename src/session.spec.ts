@@ -273,7 +273,12 @@ describe('TmuxController', () => {
     function createController() {
         const written: string[] = []
         const writer = (data: string) => {
-            written.push(data)
+            written.push(
+                ...data
+                    .split('\r')
+                    .filter(Boolean)
+                    .map((command) => command + '\r'),
+            )
         }
         const logger = createLoggerMock()
         const closer = vi.fn()
@@ -633,6 +638,7 @@ describe('TmuxController', () => {
 
     it('discovers pane titles for panes found in layout changes', async () => {
         const { controller, written } = createController()
+        controller.setClientSizePushed()
         const controllerInternals = controller as unknown as {
             capturePaneSnapshots: (
                 paneIds: Array<{ paneId: number; windowId: number }>,
@@ -661,7 +667,7 @@ describe('TmuxController', () => {
 
         await new Promise((resolve) => setTimeout(resolve, 10))
         expect(controller.getPaneTitle(7)).toBe('editor pane')
-        expect(capturePaneSnapshots).toHaveBeenCalledWith([{ paneId: 7, windowId: 0 }])
+        expect(capturePaneSnapshots).toHaveBeenCalledWith([{ paneId: 7, windowId: 0 }], false)
 
         const refreshTitle = controllerInternals.discoverPaneTitles(0, new Set([7]))
         await waitForWrite(

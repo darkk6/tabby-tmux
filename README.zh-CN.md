@@ -128,6 +128,14 @@ pnpm run watch  # 监听模式
 TABBY_PLUGINS=$(pwd) tabby --debug
 ```
 
+运行恢复性能基准（需要本机安装 tmux ≥ 3.1 和 Vim）：
+
+```bash
+pnpm run test:performance
+```
+
+基准会检查大历史、多 window、持续输出与 Vim 场景的传输量、恢复耗时和屏幕正确性。复现方法、预算与测量结果见 [恢复性能分析](doc/FIX_ATTACH_PERFORMANCE.md)。
+
 ## License
 
 MIT

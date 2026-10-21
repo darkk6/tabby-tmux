@@ -19,14 +19,58 @@ import { TmuxSessionTabComponent } from '../components/tmuxSessionTab.component'
  */
 class TmuxOutputInterceptor extends SessionMiddleware {
     private _rawOutput = new Subject<Buffer>()
+    private trailingEscape = false
+    private controlModeStarted = false
+    private startTail = ''
+    private ended = false
+    private resolveEnded: () => void
+    /** Resolves after -CC's DCS terminator, including when split across packets. */
+    readonly controlModeEnded = new Promise<void>((resolve) => {
+        this.resolveEnded = resolve
+    })
     /** Raw session output, before any middleware processing */
     rawOutput$ = this._rawOutput.asObservable()
 
     feedFromSession(data: Buffer): void {
-        // Capture raw data for the tmux gateway
-        this._rawOutput.next(data)
-        // Do NOT call super.feedFromSession() — this blocks data from
-        // propagating to the rest of the middleware chain (trzsz, etc.)
+        if (this.ended) {
+            super.feedFromSession(data)
+            return
+        }
+        const chunk = this.trailingEscape ? Buffer.concat([Buffer.from([0x1b]), data]) : data
+        let searchFrom = 0
+        if (!this.controlModeStarted) {
+            // A shell can emit OSC titles ending in ST before tmux starts.
+            // Only -CC's own DCS header makes ST an end-of-control marker.
+            const prefixLength = this.startTail.length
+            const startup = this.startTail + chunk.toString('latin1')
+            const header = /\x1bP\d+p/.exec(startup)
+            if (header) {
+                this.controlModeStarted = true
+                searchFrom = Math.max(0, header.index + header[0].length - prefixLength)
+                this.startTail = ''
+            } else {
+                this.startTail = startup.slice(-32)
+            }
+        }
+        const end = this.controlModeStarted ? chunk.indexOf('\x1b\\', searchFrom) : -1
+        if (end !== -1) {
+            this.ended = true
+            this.trailingEscape = false
+            this._rawOutput.next(chunk.subarray(0, end))
+            // The shell prompt can share the final protocol packet. Forward
+            // it before removal rewires the middleware stack.
+            super.feedFromSession(chunk.subarray(end + 2))
+            this.resolveEnded()
+            return
+        }
+        this.trailingEscape = chunk[chunk.length - 1] === 0x1b
+        this._rawOutput.next(this.trailingEscape ? chunk.subarray(0, -1) : chunk)
+    }
+
+    override close(): void {
+        this.resolveEnded()
+        this._rawOutput.complete()
+        super.close()
     }
 
     // feedFromTerminal is NOT overridden — terminal→session data flows
@@ -64,6 +108,7 @@ export interface SessionContext {
 export class TmuxService {
     private logger: Logger
     private sessions = new Set<SessionContext>()
+    private drainingTerminals = new WeakMap<object, Promise<void>>()
 
     constructor(
         private injector: Injector,
@@ -218,9 +263,17 @@ export class TmuxService {
         // confirmation dialogs when the user tries to close the restored tab.
         context.controller.gateway.detach()
 
-        // Remove the output interceptor from the original session's middleware chain
+        // detach is queued behind capture output. Keep suppressing that output
+        // until tmux actually closes its -CC DCS, even after the UI is restored.
         if (context.outputInterceptor) {
-            context.terminalTab.session?.middleware.remove(context.outputInterceptor)
+            const interceptor = context.outputInterceptor
+            const session = context.terminalTab.session
+            const draining = interceptor.controlModeEnded.then(() => {
+                session?.middleware.remove(interceptor)
+                interceptor.close()
+                this.drainingTerminals.delete(context.terminalTab)
+            })
+            this.drainingTerminals.set(context.terminalTab, draining)
             context.outputInterceptor = undefined
         }
 
@@ -319,6 +372,11 @@ export class TmuxService {
      * hidden in context. On disconnect, the terminal tab is restored.
      */
     async attachToTerminal(terminalTab: BaseTerminalTabComponent<any>): Promise<void> {
+        // UI teardown may finish before tmux has drained its capture responses.
+        // A new shell command must wait until the previous -CC DCS has ended.
+        const draining = this.drainingTerminals.get(terminalTab)
+        if (draining) await draining
+
         // Re-entrancy guard: if this terminal tab is already attached to a
         // session, don't stack a second interceptor / controller / `tmux -CC`
         // write on the same PTY (defensive — toggleTmuxMode's in-flight flag

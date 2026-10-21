@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Subject } from 'rxjs'
 import type { AppService, ConfigService, HotkeysService, LogService, Logger } from 'tabby-core'
 import { BaseTerminalTabComponent } from 'tabby-terminal'
-import { TmuxService, SessionContext } from './services/tmux.service'
+import { TmuxService, SessionContext, TmuxOutputInterceptor } from './services/tmux.service'
 
 // tabby-core / tabby-terminal / tabby components are Angular partially-compiled
 // packages; loading them in Node requires the Angular linker. Stub them so the
@@ -35,6 +35,13 @@ vi.mock('tabby-terminal', async () => {
         }
     }
     class MockSessionMiddleware {
+        outputToTerminal$ = new Subject<Buffer>()
+        feedFromSession(data: Buffer): void {
+            this.outputToTerminal$.next(data)
+        }
+        close(): void {
+            this.outputToTerminal$.complete()
+        }
         push(): void {
             void 0
         }
@@ -189,6 +196,58 @@ describe('TmuxService', () => {
     })
 
     describe('disconnectContext', () => {
+        it('waits for the previous Control Mode to end before reattaching the same terminal', async () => {
+            const { service } = createService()
+            const context = createContext()
+            const session = context.terminalTab.session
+            session.write = vi.fn()
+            const interceptor = new TmuxOutputInterceptor()
+            context.outputInterceptor = interceptor
+            interceptor.feedFromSession(Buffer.from('\x1bP1000p'))
+            await service.disconnectContext(context)
+
+            const first = service.attachToTerminal(context.terminalTab)
+            const second = service.attachToTerminal(context.terminalTab)
+            expect(session.write).not.toHaveBeenCalled()
+            expect(session.middleware.unshift).not.toHaveBeenCalled()
+            interceptor.feedFromSession(Buffer.from('%exit\r\n\x1b\\shell$ '))
+            await Promise.all([first, second])
+            expect(session.write).toHaveBeenCalledTimes(1)
+            expect(session.middleware.unshift).toHaveBeenCalledOnce()
+            const remove = vi.mocked(session.middleware.remove)
+            const unshift = vi.mocked(session.middleware.unshift)
+            expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+                unshift.mock.invocationCallOrder[0],
+            )
+
+            const nextInterceptor = unshift.mock.calls[0][0] as TmuxOutputInterceptor
+            nextInterceptor.feedFromSession(Buffer.from('\x1bP1000p'))
+            await service.disconnect()
+            nextInterceptor.feedFromSession(Buffer.from('%exit\r\n\x1b\\'))
+            await nextInterceptor.controlModeEnded
+        })
+        it('keeps protocol output intercepted until the DCS ends and preserves the shell prompt', async () => {
+            const { service } = createService()
+            const context = createContext()
+            const interceptor = new TmuxOutputInterceptor()
+            context.outputInterceptor = interceptor
+            interceptor.feedFromSession(Buffer.from('\x1bP1000p'))
+            const output: string[] = []
+            interceptor.outputToTerminal$.subscribe((data) => output.push(data.toString()))
+            await service.disconnectContext(context)
+            const remove = context.terminalTab.session.middleware.remove
+            expect(remove).not.toHaveBeenCalled()
+            interceptor.feedFromSession(
+                Buffer.from('%begin 1 1 1\nremaining history\n%end 1 1 1\n'),
+            )
+            expect(output).toEqual([])
+            interceptor.feedFromSession(Buffer.from('%exit\r\n\x1b'))
+            expect(remove).not.toHaveBeenCalled()
+            interceptor.feedFromSession(Buffer.from('\\shell$ '))
+            await interceptor.controlModeEnded
+            expect(output.join('')).toBe('shell$ ')
+            expect(remove).toHaveBeenCalledWith(interceptor)
+        })
         it('restores the original topmost tab inside the Angular zone', async () => {
             const { service, zone, selectTab, tabs } = createService()
             const originalTab = { name: 'original' }
@@ -300,5 +359,46 @@ describe('TmuxService', () => {
 
             expect(toggleSpy).not.toHaveBeenCalled()
         })
+    })
+})
+
+describe('TmuxOutputInterceptor', () => {
+    it('handles a server-initiated exit and subsequent shell output in the same packet', async () => {
+        const interceptor = new TmuxOutputInterceptor()
+        const terminal: string[] = []
+        const protocol: string[] = []
+        interceptor.outputToTerminal$.subscribe((data) => terminal.push(data.toString()))
+        interceptor.rawOutput$.subscribe((data) => protocol.push(data.toString()))
+        interceptor.feedFromSession(Buffer.from('\x1bP1000p%exit\r\n\x1b\\shell$ '))
+        await interceptor.controlModeEnded
+        interceptor.feedFromSession(Buffer.from('echo hello'))
+        expect(protocol.join('')).toBe('\x1bP1000p%exit\r\n')
+        expect(terminal.join('')).toBe('shell$ echo hello')
+    })
+
+    it('does not confuse escaped pane output with the DCS terminator', () => {
+        const interceptor = new TmuxOutputInterceptor()
+        const terminal: Buffer[] = []
+        interceptor.outputToTerminal$.subscribe((data) => terminal.push(data))
+        interceptor.feedFromSession(Buffer.from('\x1bP1000p%output %1 \\033\\134\n'))
+        expect(terminal).toEqual([])
+        interceptor.close()
+    })
+
+    it('ignores shell OSC terminators before a fragmented control-mode header', async () => {
+        const interceptor = new TmuxOutputInterceptor()
+        const terminal: Buffer[] = []
+        interceptor.outputToTerminal$.subscribe((data) => terminal.push(data))
+        interceptor.feedFromSession(Buffer.from('\x1b]0;shell title\x1b\\\r\n'))
+        interceptor.feedFromSession(Buffer.from('\x1bP10'))
+        interceptor.feedFromSession(Buffer.from('00p%exit\r\n\x1b\\shell$ '))
+        await interceptor.controlModeEnded
+        expect(Buffer.concat(terminal).toString()).toBe('shell$ ')
+    })
+
+    it('releases disconnect cleanup if the underlying session closes before %exit', async () => {
+        const interceptor = new TmuxOutputInterceptor()
+        interceptor.close()
+        await expect(interceptor.controlModeEnded).resolves.toBeUndefined()
     })
 })

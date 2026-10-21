@@ -32,6 +32,53 @@ async function initGateway(gateway: TmuxGateway): Promise<void> {
 }
 
 describe('TmuxGateway sendCommand', () => {
+    it('rejects a failed batch write without leaving pending timers or response slots', async () => {
+        const gateway = new TmuxGateway(
+            { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger,
+            () => {
+                throw new Error('transport closed')
+            },
+        )
+        await expect(
+            gateway.sendCommands([{ command: 'first' }, { command: 'second' }]),
+        ).rejects.toThrow('transport closed')
+        await expect(gateway.sendCommand('next')).rejects.toThrow('Gateway disconnected')
+    })
+    it('writes a capture batch and its closing fence together, with independent error responses', async () => {
+        const { gateway, written } = createGateway()
+        const capturing = gateway.sendCommands([
+            { command: 'capture-pane -p' },
+            { command: 'list-panes' },
+        ])
+        expect(written).toEqual(['capture-pane -p\rlist-panes\r'])
+        const rejected = expect(capturing).rejects.toThrow('no pane')
+        gateway.executeData(
+            Buffer.from('%begin 1 1 1\nno pane\n%error 1 1 1\n%begin 1 2 1\nstate\n%end 1 2 1\n'),
+        )
+        await rejected
+        const next = gateway.sendCommand('next')
+        gateway.executeData(Buffer.from('%begin 1 3 1\ncorrect\n%end 1 3 1\n'))
+        expect(await next).toBe('correct')
+    })
+
+    it('cancels both current and queued commands on disposal', async () => {
+        const { gateway } = createGateway()
+        const first = gateway.sendCommand('first')
+        const second = gateway.sendCommand('second')
+        const firstRejected = expect(first).rejects.toThrow('Gateway disconnected')
+        const secondRejected = expect(second).rejects.toThrow('Gateway disconnected')
+        gateway.executeData(Buffer.from('%begin 1 1 1\npartial\n'))
+        gateway.dispose()
+        await Promise.all([firstRejected, secondRejected])
+        await expect(gateway.sendCommand('third')).rejects.toThrow('Gateway disconnected')
+    })
+
+    it('does not send detach into the shell after a server-initiated exit', () => {
+        const { gateway, written } = createGateway()
+        gateway.exit$.subscribe(() => gateway.detach())
+        gateway.executeLine('%exit')
+        expect(written).toEqual([])
+    })
     it('marks a successful response before later output in the same packet', async () => {
         const { gateway } = createGateway()
         await initGateway(gateway)
@@ -112,6 +159,7 @@ describe('TmuxGateway sendCommand', () => {
         const { gateway, written } = createGateway()
         gateway.detach()
         gateway.detach()
+        gateway.sendKeys(Buffer.from('late input'), 1)
         expect(written).toEqual(['detach\r'])
         await expect(gateway.sendCommand('x')).rejects.toThrow('Gateway disconnected')
     })
