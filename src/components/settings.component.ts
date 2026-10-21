@@ -13,7 +13,7 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
         <h3>{{ i18n.t('settings.title') }}</h3>
         <div class="tmux-settings-tab">
             <div class="tmux-table">
-                <div class="row">
+                <div class="setting-row">
                     <div class="header">
                         <div class="title">{{ i18n.t('settings.defaultSessionName') }}</div>
                     </div>
@@ -24,7 +24,7 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
                         (ngModelChange)="saveConfig()"
                     />
                 </div>
-                <div class="row">
+                <div class="setting-row">
                     <div class="header">
                         <div class="title">{{ i18n.t('settings.sessionTitleFormat') }}</div>
                     </div>
@@ -35,7 +35,7 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
                         (ngModelChange)="saveConfig()"
                     />
                 </div>
-                <div class="row">
+                <div class="setting-row">
                     <div class="header">
                         <div class="title">{{ i18n.t('settings.historyRestoreLimit') }}</div>
                     </div>
@@ -56,7 +56,7 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
                         }}</small>
                     </div>
                 </div>
-                <div class="row">
+                <div class="setting-row">
                     <div class="header">
                         <div class="title">{{ i18n.t('settings.commandTimeout') }}</div>
                     </div>
@@ -67,7 +67,7 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
                         (ngModelChange)="saveConfig()"
                     />
                 </div>
-                <div class="row">
+                <div class="setting-row">
                     <div class="header">
                         <div class="title">{{ i18n.t('settings.sendKeysChunkSize') }}</div>
                     </div>
@@ -78,7 +78,7 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
                         (ngModelChange)="saveConfig()"
                     />
                 </div>
-                <div class="row">
+                <div class="setting-row">
                     <div class="header">
                         <div class="title">{{ i18n.t('settings.resizeDebounce') }}</div>
                     </div>
@@ -89,7 +89,7 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
                         (ngModelChange)="saveConfig()"
                     />
                 </div>
-                <div class="row">
+                <div class="setting-row">
                     <div class="header">
                         <div class="title">{{ i18n.t('settings.debugLogging') }}</div>
                     </div>
@@ -99,7 +99,7 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
                         (ngModelChange)="saveConfig()"
                     />
                 </div>
-                <div class="row">
+                <div class="setting-row">
                     <div class="header">
                         <div class="title">{{ i18n.t('settings.showCloseButton') }}</div>
                     </div>
