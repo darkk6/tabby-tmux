@@ -17,6 +17,10 @@ const englishTranslations = {
     'settings.resizeDebounce': 'Resize debounce (ms):',
     'settings.debugLogging': 'Debug logging:',
     'settings.showCloseButton': 'Show close button on tabs:',
+    'settings.excludedMenus': 'Excluded pane menus',
+    'settings.excludedMenusHelp':
+        'Built-in menus are hidden automatically. Check a group below to exclude its menus in tmux panes. Other plugins are shown by default; compatibility may vary. Changes apply the next time you open a pane menu.',
+    'settings.resetMenuExclusions': 'Reset exclusions',
     'mode.enter': 'Enter Tmux Mode',
     'mode.exit': 'Exit Tmux Mode',
     'mode.disconnect': 'Disconnect',
@@ -78,6 +82,10 @@ const chineseTranslations: { [K in keyof typeof englishTranslations]: string } =
     'settings.resizeDebounce': '调整大小防抖（毫秒）：',
     'settings.debugLogging': '调试日志：',
     'settings.showCloseButton': '在 tab 上显示关闭按钮：',
+    'settings.excludedMenus': '排除的 pane 菜单',
+    'settings.excludedMenusHelp':
+        '内置菜单已自动隐藏。勾选下方菜单组可将其从 tmux pane 菜单中排除。其他插件的菜单默认显示，兼容性需实际验证。下次打开 pane 菜单时生效。',
+    'settings.resetMenuExclusions': '重置排除项',
     'mode.enter': '进入 Tmux 模式',
     'mode.exit': '退出 Tmux 模式',
     'mode.disconnect': '断开连接',

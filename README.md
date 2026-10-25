@@ -97,7 +97,13 @@ tmux list-panes -a -F '#{pane_id} history_size=#{history_size} history_limit=#{h
 
 ### Right-click behavior
 
-By default, right-clicking inside a tmux pane opens the **tmux pane context menu** (used for actions like _Enter/Exit Tmux Mode_, _New Window_, etc.), regardless of the _Settings → Terminal → "On right-click"_ option.
+With **Settings → Terminal → "On right-click"** set to `Menu`, right-clicking inside a tmux pane opens its context menu, including tmux actions and menus contributed by other plugins.
+
+Built-in copy/paste, pane rename/label, close/split, toolbar/focus, switch-profile, save-as-profile, task/activity notifications, disconnect/reconnect, SFTP, and new-terminal/profile menus are automatically hidden in tmux panes and omitted from the settings list. Tmux's own actions remain available.
+
+Use **Settings → Tmux → Excluded pane menus** to exclude other menu groups by source. Checked groups are skipped before their menus are requested. Resetting exclusions re-enables these other groups while keeping the built-in menus hidden.
+
+Other plugin menus are enabled by default, but displaying a menu does not guarantee that its actions work with tmux. Exclusions apply the next time you open a pane menu; normal terminal and tab-header menus are unaffected. Legacy terminal-menu plugins are listed separately too. Sources are identified by provider class name (with separate IDs for the two menu APIs), so a plugin that renames its provider may need its exclusion selected again.
 
 If you set **"On right-click"** to `Paste` or `Clipboard` in Tabby settings, this plugin will respect that choice:
 

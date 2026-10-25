@@ -97,7 +97,13 @@ tmux list-panes -a -F '#{pane_id} history_size=#{history_size} history_limit=#{h
 
 ### 右键行为
 
-默认情况下，在 tmux pane 内右键会直接弹出 **tmux pane 上下文菜单**（用于 _Enter/Exit Tmux Mode_、_New Window_ 等操作），而**不会**遵循 Tabby 的 _Settings → Terminal → "On right-click"_ 设置。
+当 **Settings → Terminal → "On right-click"** 为 `Menu` 时，在 tmux pane 内右键会显示 pane 菜单，其中包含 tmux 操作和其他插件提供的菜单。
+
+原生复制/粘贴、pane 重命名/标签、关闭/拆分、工具栏/聚焦、切换 profile、保存为 profile、任务和活动通知、断开/重新连接、SFTP、新建终端/profile 等内置菜单，在 tmux pane 中自动隐藏，也不再出现在设置列表中。tmux 自身的操作始终保留。
+
+在 **Settings → Tmux → 排除的 pane 菜单** 中，可以按来源排除其他菜单组。勾选后，插件会在请求该组菜单前跳过它。重置排除项会重新启用这些菜单组，内置菜单仍保持隐藏。
+
+其他插件的菜单默认启用，但菜单能够显示不代表其操作一定兼容 tmux。排除设置在下次打开 pane 菜单时生效，不影响普通终端和 tab 标题栏菜单；旧版终端菜单插件也会单独列出。菜单来源按 provider 类名标识（两套菜单 API 使用不同前缀），如果插件升级时更改了类名，需要重新勾选对应排除项。
 
 如果你在 Tabby 设置中将 **"On right-click"** 改为 `Paste` 或 `Clipboard`，本插件会尊重该选择：
 

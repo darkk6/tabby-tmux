@@ -43,6 +43,7 @@ describe('TmuxConfigProvider', () => {
             resizeDebounceMs: 150,
             debugLogging: false,
             showWindowCloseButton: true,
+            excludedMenuProviders: [],
         })
     })
 

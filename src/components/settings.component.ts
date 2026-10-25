@@ -6,6 +6,8 @@ import { TmuxI18nService } from '../services/tmuxI18n.service'
 import { TmuxConfigChangeService } from '../services/tmuxConfigChange.service'
 import { copyTextToClipboard } from '../clipboard'
 import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../historyRestore'
+import { TmuxMenuService, TmuxMenuGroup } from '../services/tmuxMenu.service'
+import { getExcludedMenuProviders } from '../tmuxMenu'
 
 // eslint-disable-next-line new-cap
 @Component({
@@ -110,6 +112,31 @@ import { MAX_HISTORY_RESTORE_LIMIT, normalizeHistoryRestoreLimit } from '../hist
                     />
                 </div>
             </div>
+            <div class="menu-exclusions">
+                <h4>{{ i18n.t('settings.excludedMenus') }}</h4>
+                <p class="text-muted">{{ i18n.t('settings.excludedMenusHelp') }}</p>
+                <label
+                    class="menu-exclusion"
+                    *ngFor="let group of menuGroups; trackBy: trackMenuGroup"
+                >
+                    <input
+                        type="checkbox"
+                        [checked]="isMenuExcluded(group.id)"
+                        (change)="setMenuExcluded(group.id, $any($event.target).checked)"
+                    />
+                    <span>
+                        {{ group.label }}
+                        <small class="text-muted">{{ group.id }}</small>
+                    </span>
+                </label>
+                <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    (click)="resetMenuExclusions()"
+                >
+                    {{ i18n.t('settings.resetMenuExclusions') }}
+                </button>
+            </div>
             <div class="format-help" role="note">
                 <div class="format-help-header">
                     <div class="format-help-title">
@@ -147,6 +174,7 @@ export class TmuxSettingsTabComponent implements OnDestroy {
         public i18n: TmuxI18nService,
         private cdr: ChangeDetectorRef,
         private configChanges: TmuxConfigChangeService,
+        private menus: TmuxMenuService,
     ) {
         this.languageSubscription = this.i18n.languageChange$.subscribe(() =>
             this.cdr.detectChanges(),
@@ -156,6 +184,35 @@ export class TmuxSettingsTabComponent implements OnDestroy {
     saveConfig(): void {
         this.config.save()
         this.configChanges.notifyChanged()
+    }
+
+    get menuGroups(): TmuxMenuGroup[] {
+        return this.menus.getGroups()
+    }
+
+    trackMenuGroup(_index: number, group: TmuxMenuGroup): string {
+        return group.id
+    }
+
+    isMenuExcluded(id: string): boolean {
+        return getExcludedMenuProviders(
+            this.config.store.tmuxPlugin.excludedMenuProviders,
+        ).includes(id)
+    }
+
+    setMenuExcluded(id: string, excluded: boolean): void {
+        const ids = new Set(
+            getExcludedMenuProviders(this.config.store.tmuxPlugin.excludedMenuProviders),
+        )
+        if (excluded) ids.add(id)
+        else ids.delete(id)
+        this.config.store.tmuxPlugin.excludedMenuProviders = [...ids]
+        this.saveConfig()
+    }
+
+    resetMenuExclusions(): void {
+        this.config.store.tmuxPlugin.excludedMenuProviders = []
+        this.saveConfig()
     }
 
     setHistoryRestoreLimit(value: unknown, model?: NgModel): void {

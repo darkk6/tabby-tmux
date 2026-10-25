@@ -4,6 +4,7 @@ import { BaseTerminalTabComponent } from 'tabby-terminal'
 import { MenuItemOptions } from 'tabby-core'
 import { TmuxController, TmuxPaneSession, SyncScope } from '../session'
 import { TmuxI18nService } from '../services/tmuxI18n.service'
+import { TmuxMenuService } from '../services/tmuxMenu.service'
 import { getTmuxWindowRenameTarget } from '../tmuxRename'
 
 import { buildPaneProfile, HostProfile } from './tmuxPaneProfile'
@@ -568,13 +569,37 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
     getCustomTitle(): string {
         return this.getPaneDisplayName()
     }
-    /**
-     * Override the native context menu to provide tmux-specific items only.
-     * Keeps: Copy, Paste, Search, Close (pane).
-     * Adds: Rename Pane, Rename Window, Exit Tmux Mode, Split submenu, Zoom
-     * pane, Focus all tmux panes submenu (scope: current window or all windows).
-     */
-    async buildContextMenu(): Promise<MenuItemOptions[]> {
+    override async buildContextMenu(): Promise<MenuItemOptions[]> {
+        return this.injector.get(TmuxMenuService).buildMenu(this)
+    }
+
+    /** Shared by pane menus and Tabby's tab-header provider pipeline. */
+    buildTmuxContextMenu(tabHeader = false): MenuItemOptions[] {
+        const rename: MenuItemOptions = {
+            label: this.i18n.t('pane.rename'),
+            click: () => this.renamePaneFromMenu(),
+        }
+        const split: MenuItemOptions = {
+            label: this.i18n.t('pane.split'),
+            submenu: [
+                { label: this.i18n.t('pane.right'), click: () => this.splitPane('right') },
+                { label: this.i18n.t('pane.down'), click: () => this.splitPane('down') },
+                { label: this.i18n.t('pane.left'), click: () => this.splitPane('left') },
+                { label: this.i18n.t('pane.up'), click: () => this.splitPane('up') },
+            ],
+        }
+        const close: MenuItemOptions = {
+            label: this.i18n.t('pane.close'),
+            click: () => this.closePane(),
+        }
+        const exit: MenuItemOptions = {
+            label: this.i18n.t('mode.exit'),
+            click: () => {
+                const sessionTab = this.parent as any
+                sessionTab?.onDisconnect?.()
+            },
+        }
+        if (tabHeader) return [exit, rename, split, close]
         const items: MenuItemOptions[] = [
             {
                 label: this.i18n.t('pane.copy'),
@@ -588,27 +613,13 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
                 label: this.i18n.t('search.placeholder'),
                 click: () => this.openSearchPanel(),
             },
-            {
-                label: this.i18n.t('pane.rename'),
-                click: () => this.renamePaneFromMenu(),
-            },
+            rename,
             {
                 label: this.i18n.t('window.rename'),
                 click: () => this.renameWindowFromMenu(),
             },
             { type: 'separator' },
-            {
-                label: this.i18n.t('pane.split'),
-                submenu: [
-                    {
-                        label: this.i18n.t('pane.right'),
-                        click: () => this.splitPane('right'),
-                    },
-                    { label: this.i18n.t('pane.down'), click: () => this.splitPane('down') },
-                    { label: this.i18n.t('pane.left'), click: () => this.splitPane('left') },
-                    { label: this.i18n.t('pane.up'), click: () => this.splitPane('up') },
-                ] as MenuItemOptions[],
-            },
+            split,
             {
                 label: this.i18n.t('pane.zoom'),
                 type: 'checkbox',
@@ -637,18 +648,9 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
                 ] as MenuItemOptions[],
             },
             { type: 'separator' },
-            {
-                label: this.i18n.t('pane.close'),
-                click: () => this.closePane(),
-            },
+            close,
             { type: 'separator' },
-            {
-                label: this.i18n.t('mode.exit'),
-                click: () => {
-                    const sessionTab = this.parent as any
-                    sessionTab?.onDisconnect?.()
-                },
-            },
+            exit,
         ]
         return items
     }

@@ -7,6 +7,9 @@ import type { NgModel } from '@angular/forms'
 import type { ConfigService } from 'tabby-core'
 import type { TmuxI18nService } from '../services/tmuxI18n.service'
 import { TmuxConfigChangeService } from '../services/tmuxConfigChange.service'
+import type { TmuxMenuService } from '../services/tmuxMenu.service'
+
+vi.mock('../services/tmuxMenu.service', () => ({ TmuxMenuService: class {} }))
 
 vi.mock('tabby-core', () => ({ ConfigService: class {}, LocaleService: class {} }))
 
@@ -49,6 +52,7 @@ describe('history restoration settings', () => {
             { languageChange$: new Subject<string>() } as unknown as TmuxI18nService,
             { detectChanges: vi.fn() } as unknown as ChangeDetectorRef,
             changes,
+            { getGroups: () => [] } as unknown as TmuxMenuService,
         )
         const setValue = vi.fn()
         const model = { control: { setValue } } as unknown as NgModel
@@ -64,6 +68,45 @@ describe('history restoration settings', () => {
             } else {
                 expect(setValue).not.toHaveBeenCalled()
             }
+        } finally {
+            component.ngOnDestroy()
+            subscription.unsubscribe()
+        }
+    })
+})
+
+describe('pane menu exclusion settings', () => {
+    it('saves third-party exclusions and resets them', () => {
+        const save = vi.fn()
+        const config = {
+            store: { tmuxPlugin: { excludedMenuProviders: undefined as string[] | undefined } },
+            save,
+        } as unknown as ConfigService
+        const changes = new TmuxConfigChangeService()
+        const notified = vi.fn()
+        const subscription = changes.changed$.subscribe(notified)
+        const groups = [{ id: 'tab:PushContextMenuProvider', label: 'Push Toolkit' }]
+        const component = new Settings(
+            config,
+            { languageChange$: new Subject<string>() } as unknown as TmuxI18nService,
+            { detectChanges: vi.fn() } as unknown as ChangeDetectorRef,
+            changes,
+            { getGroups: () => groups } as unknown as TmuxMenuService,
+        )
+        try {
+            expect(component.menuGroups).toEqual(groups)
+            component.setMenuExcluded(groups[0].id, true)
+            expect(component.isMenuExcluded(groups[0].id)).toBe(true)
+            component.setMenuExcluded(groups[0].id, true)
+            expect(config.store.tmuxPlugin.excludedMenuProviders).toEqual([groups[0].id])
+            component.setMenuExcluded(groups[0].id, false)
+            expect(config.store.tmuxPlugin.excludedMenuProviders).toEqual([])
+            expect(component.isMenuExcluded(groups[0].id)).toBe(false)
+            component.setMenuExcluded(groups[0].id, true)
+            component.resetMenuExclusions()
+            expect(config.store.tmuxPlugin.excludedMenuProviders).toEqual([])
+            expect(save.mock.calls.length).toBe(5)
+            expect(notified.mock.calls.length).toBe(5)
         } finally {
             component.ngOnDestroy()
             subscription.unsubscribe()

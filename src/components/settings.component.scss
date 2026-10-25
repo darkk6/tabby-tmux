@@ -31,6 +31,19 @@
             }
         }
     }
+    .menu-exclusions {
+        margin-top: 2em;
+        .menu-exclusion {
+            display: flex;
+            align-items: baseline;
+            gap: 0.75em;
+            margin-bottom: 0.65em;
+            small {
+                display: block;
+                overflow-wrap: anywhere;
+            }
+        }
+    }
     .format-help {
         margin-top: 1em;
         padding: 0.85em 1em;

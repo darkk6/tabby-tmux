@@ -13,6 +13,7 @@ export class TmuxConfigProvider extends ConfigProvider {
             resizeDebounceMs: 150,
             debugLogging: false,
             showWindowCloseButton: true,
+            excludedMenuProviders: [] as string[],
         },
         // Window-level hotkeys unique to tmux mode (see
         // doc/DESIGN_KEYBINDINGS.md). Tabby's getHotkeysConfigRecursive
