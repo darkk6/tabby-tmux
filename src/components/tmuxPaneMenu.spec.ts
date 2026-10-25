@@ -5,6 +5,8 @@ import type { ConfigService, LogService, TabContextMenuItemProvider } from 'tabb
 import type { TmuxI18nService } from '../services/tmuxI18n.service'
 import type { TmuxService } from '../services/tmux.service'
 import { TmuxMenuService } from '../services/tmuxMenu.service'
+import { translateTmux, TmuxLocale, TmuxTranslationKey } from '../i18n'
+import type { SyncScope } from '../session'
 
 vi.mock('tabby-core', () => ({
     ConfigService: class {},
@@ -43,6 +45,72 @@ beforeAll(async () => {
 })
 
 describe('tmux pane menu integration', () => {
+    it.each([
+        ['en', 'off', 'Focus all tmux panes'],
+        ['en', 'window', 'Focus all tmux panes ✓'],
+        ['en', 'all', 'Focus all tmux panes ✓'],
+        ['zh', 'off', '聚焦所有 tmux pane'],
+        ['zh', 'window', '聚焦所有 tmux pane ✓'],
+        ['zh', 'all', '聚焦所有 tmux pane ✓'],
+    ] as [TmuxLocale, SyncScope, string][])(
+        'marks the parent menu when %s %s sync is enabled',
+        (locale, scope, label) => {
+            const pane = Object.assign(Object.create(Pane.prototype), {
+                i18n: {
+                    t: (key: TmuxTranslationKey, params?: Record<string, string | number>) =>
+                        translateTmux(locale, key, params),
+                },
+                controller: {
+                    getSyncScope: () => scope,
+                    isPaneZoomed: () => false,
+                    getWindowPaneCount: () => 2,
+                },
+            }) as InstanceType<typeof Pane>
+
+            const item = pane.buildTmuxContextMenu().find((entry) => entry.label === label)
+            expect(item).toBeDefined()
+            expect(item?.submenu?.map((entry) => entry.checked)).toEqual([
+                scope === 'window',
+                scope === 'all',
+            ])
+        },
+    )
+
+    it('refreshes the parent label when switching scopes and turning sync off', () => {
+        let scope: SyncScope = 'off'
+        const pane = Object.assign(Object.create(Pane.prototype), {
+            i18n: {
+                t: (key: TmuxTranslationKey, params?: Record<string, string | number>) =>
+                    translateTmux('en', key, params),
+            },
+            controller: {
+                getSyncScope: () => scope,
+                setSyncScope: (value: SyncScope) => {
+                    scope = value
+                },
+                isPaneZoomed: () => false,
+                getWindowPaneCount: () => 2,
+            },
+        }) as InstanceType<typeof Pane>
+        const syncMenu = () => {
+            const item = pane
+                .buildTmuxContextMenu()
+                .find((entry) => entry.label?.includes('Focus all tmux panes'))
+            if (!item) throw new Error('Missing synchronized-input menu')
+            return item
+        }
+
+        syncMenu().submenu?.[0].click?.()
+        expect(syncMenu().label).toBe('Focus all tmux panes ✓')
+        expect(syncMenu().submenu?.map((item) => item.checked)).toEqual([true, false])
+        syncMenu().submenu?.[1].click?.()
+        expect(syncMenu().label).toBe('Focus all tmux panes ✓')
+        expect(syncMenu().submenu?.map((item) => item.checked)).toEqual([false, true])
+        syncMenu().submenu?.[1].click?.()
+        expect(syncMenu().label).toBe('Focus all tmux panes')
+        expect(syncMenu().submenu?.map((item) => item.checked)).toEqual([false, false])
+    })
+
     it('composes the real pane provider with plugins and routes Close to kill-pane', async () => {
         const i18n = { t: (key: string) => key } as unknown as TmuxI18nService
         const tmuxProvider = new Provider({} as TmuxService, i18n)

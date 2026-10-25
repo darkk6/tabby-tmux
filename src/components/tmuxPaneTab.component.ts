@@ -600,6 +600,7 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
             },
         }
         if (tabHeader) return [exit, rename, split, close]
+        const syncScope = this.controller?.getSyncScope() ?? 'off'
         const items: MenuItemOptions[] = [
             {
                 label: this.i18n.t('pane.copy'),
@@ -631,18 +632,18 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
                 click: () => this.toggleZoom(),
             },
             {
-                label: this.i18n.t('pane.focusAll'),
+                label: `${this.i18n.t('pane.focusAll')}${syncScope === 'off' ? '' : ' ✓'}`,
                 submenu: [
                     {
                         label: this.i18n.t('window.current'),
                         type: 'checkbox',
-                        checked: this.controller?.getSyncScope() === 'window',
+                        checked: syncScope === 'window',
                         click: () => this.toggleSyncInput('window'),
                     },
                     {
                         label: this.i18n.t('window.all'),
                         type: 'checkbox',
-                        checked: this.controller?.getSyncScope() === 'all',
+                        checked: syncScope === 'all',
                         click: () => this.toggleSyncInput('all'),
                     },
                 ] as MenuItemOptions[],
