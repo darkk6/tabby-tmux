@@ -1,5 +1,6 @@
 import { ConfigProvider } from 'tabby-core'
 import { DEFAULT_HISTORY_RESTORE_LIMIT } from './historyRestore'
+import type { MenuProviderLabel } from './tmuxMenu'
 
 // eslint-disable-next-line new-cap
 export class TmuxConfigProvider extends ConfigProvider {
@@ -14,6 +15,7 @@ export class TmuxConfigProvider extends ConfigProvider {
             debugLogging: false,
             showWindowCloseButton: true,
             excludedMenuProviders: [] as string[],
+            menuProviderLabels: [] as MenuProviderLabel[],
         },
         // Window-level hotkeys unique to tmux mode (see
         // doc/DESIGN_KEYBINDINGS.md). Tabby's getHotkeysConfigRecursive

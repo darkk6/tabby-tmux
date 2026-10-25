@@ -103,7 +103,7 @@ Built-in copy/paste, pane rename/label, close/split, toolbar/focus, switch-profi
 
 Use **Settings → Tmux → Excluded pane menus** to exclude other menu groups by source. Checked groups are skipped before their menus are requested. Resetting exclusions re-enables these other groups while keeping the built-in menus hidden.
 
-Other plugin menus are enabled by default, but displaying a menu does not guarantee that its actions work with tmux. Exclusions apply the next time you open a pane menu; normal terminal and tab-header menus are unaffected. Legacy terminal-menu plugins are listed separately too. Sources are identified by provider class name (with separate IDs for the two menu APIs), so a plugin that renames its provider may need its exclusion selected again.
+Other plugin menus are enabled by default, but displaying a menu does not guarantee that its actions work with tmux. Exclusions apply the next time you open a pane menu; normal terminal and tab-header menus are unaffected. Legacy terminal-menu plugins are listed separately too. Sources use the plugin name, menu API, and registration position as their ID, so minified class names do not collide. Menu titles are read from provider results when you open a pane menu and saved for use after restart, even when a source is excluded. Until a title has been discovered, settings show the plugin name. A plugin update that reorders its menu providers may require reselecting exclusions.
 
 If you set **"On right-click"** to `Paste` or `Clipboard` in Tabby settings, this plugin will respect that choice:
 

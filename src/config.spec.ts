@@ -44,6 +44,7 @@ describe('TmuxConfigProvider', () => {
             debugLogging: false,
             showWindowCloseButton: true,
             excludedMenuProviders: [],
+            menuProviderLabels: [],
         })
     })
 

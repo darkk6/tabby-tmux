@@ -85,7 +85,7 @@ describe('pane menu exclusion settings', () => {
         const changes = new TmuxConfigChangeService()
         const notified = vi.fn()
         const subscription = changes.changed$.subscribe(notified)
-        const groups = [{ id: 'tab:PushContextMenuProvider', label: 'Push Toolkit' }]
+        const groups = [{ id: 'tab:push-toolkit:0', label: 'Push Toolkit' }]
         const component = new Settings(
             config,
             { languageChange$: new Subject<string>() } as unknown as TmuxI18nService,

@@ -13,6 +13,10 @@ import {
 } from 'tabby-terminal'
 import {
     getExcludedMenuProviders,
+    getMenuProviderLabels,
+    findMenuProviderIdentity,
+    formatMenuSourceName,
+    MenuPluginModule,
     HIDDEN_BUILTIN_MENU_PROVIDERS,
     TMUX_MENU_PROVIDER,
 } from '../tmuxMenu'
@@ -26,6 +30,7 @@ export interface TmuxMenuGroup {
 
 interface MenuSource {
     id: string
+    label: string
     weight: number
     tmux: boolean
     getItems(tab: BaseTerminalTabComponent<BaseTerminalProfile>): Promise<MenuItemOptions[]>
@@ -48,7 +53,7 @@ function cleanSeparators(items: MenuItemOptions[]): MenuItemOptions[] {
 /** Composes pane menus without changing Tabby's global provider registrations. */
 @Injectable({ providedIn: 'root' })
 export class TmuxMenuService {
-    private labels = new Map<string, string>()
+    private labels: Map<string, string>
     private logger: Logger
 
     constructor(
@@ -62,35 +67,61 @@ export class TmuxMenuService {
         private legacyProviders: TerminalContextMenuItemProvider[] | null,
     ) {
         this.logger = log.create('tmux-menu')
+        this.labels = getMenuProviderLabels(this.config.store.tmuxPlugin.menuProviderLabels)
     }
 
     private getSources(): MenuSource[] {
+        const modules: MenuPluginModule[] =
+            typeof window === 'undefined' ? [] : (window['pluginModules'] ?? [])
         const sources: MenuSource[] = []
+        const identify = (
+            provider: TabContextMenuItemProvider | TerminalContextMenuItemProvider,
+            api: 'tab' | 'terminal',
+            index: number,
+        ) => {
+            const token =
+                api === 'tab' ? TabContextMenuItemProvider : TerminalContextMenuItemProvider
+            const identity = findMenuProviderIdentity(provider, token, modules)
+            // Unknown sources still need distinct IDs when metadata is absent.
+            const pluginName = identity?.pluginName ?? 'unregistered'
+            const slot = identity?.slot ?? index
+            const id = `${api}:${encodeURIComponent(pluginName)}:${slot}`
+            const label =
+                formatMenuSourceName(identity?.pluginName ?? provider.constructor.name) ||
+                `Menu ${slot + 1}`
+            return { id, label, pluginName }
+        }
         const providers = this.config.enabledServices(this.providers ?? [])
         for (const provider of providers) {
-            // Expand the enabled legacy bridge so each legacy plugin can be
-            // excluded independently, without requesting its items twice.
-            if (provider.constructor.name === 'LegacyContextMenu') {
+            const source = identify(provider, 'tab', (this.providers ?? []).indexOf(provider))
+            // Built-in behavior is identified by both the owner and class, so
+            // an unrelated plugin using the same class name remains available.
+            const builtin =
+                source.pluginName === 'unregistered' ||
+                ['core', 'terminal', 'local', 'ssh'].includes(source.pluginName)
+            if (builtin && provider.constructor.name === 'LegacyContextMenu') {
                 for (const legacy of this.config.enabledServices(this.legacyProviders ?? [])) {
                     sources.push({
-                        id: `terminal:${legacy.constructor.name}`,
+                        ...identify(
+                            legacy,
+                            'terminal',
+                            (this.legacyProviders ?? []).indexOf(legacy),
+                        ),
                         weight: provider.weight,
                         tmux: false,
                         getItems: (tab) => legacy.getItems(tab),
                     })
                 }
-            } else {
+            } else if (!builtin || !HIDDEN_BUILTINS.has(provider.constructor.name)) {
                 sources.push({
-                    id: `tab:${provider.constructor.name}`,
+                    ...source,
                     weight: provider.weight,
                     tmux: !!provider[TMUX_MENU_PROVIDER],
                     getItems: (tab) => provider.getItems(tab),
                 })
             }
         }
-        return sources
-            .filter((source) => !HIDDEN_BUILTINS.has(source.id))
-            .sort((a, b) => a.weight - b.weight)
+        return sources.sort((a, b) => a.weight - b.weight)
     }
 
     getGroups(): TmuxMenuGroup[] {
@@ -98,41 +129,53 @@ export class TmuxMenuService {
         const protectedIds = new Set(
             sources.filter((source) => source.tmux).map((source) => source.id),
         )
-        const ids = new Set(sources.filter((source) => !source.tmux).map((source) => source.id))
+        const groups = new Map(
+            sources.filter((source) => !source.tmux).map((source) => [source.id, source]),
+        )
         // Keep saved exclusions editable even after a plugin is uninstalled.
-        for (const id of getExcludedMenuProviders(
-            this.config.store.tmuxPlugin.excludedMenuProviders,
-        )) {
-            if (!protectedIds.has(id) && !HIDDEN_BUILTINS.has(id)) ids.add(id)
+        const ids = new Set([
+            ...groups.keys(),
+            ...getExcludedMenuProviders(this.config.store.tmuxPlugin.excludedMenuProviders),
+        ])
+        return [...ids]
+            .filter((id) => !protectedIds.has(id))
+            .map((id) => ({
+                id,
+                label: this.labels.get(id) ?? groups.get(id)?.label ?? this.getSavedLabel(id),
+            }))
+    }
+
+    private getSavedLabel(id: string): string {
+        const parts = id.split(':')
+        let name = parts[1] ?? id
+        try {
+            name = decodeURIComponent(name)
+        } catch {
+            // Keep malformed or manually edited IDs readable and removable.
         }
-        return [...ids].map((id) => ({
-            id,
-            label:
-                this.labels.get(id) ??
-                id
-                    .substring(id.indexOf(':') + 1)
-                    .replace(
-                        /(ContextMenuItemProvider|ContextMenuProvider|ContextMenu|Provider)$/,
-                        '',
-                    )
-                    .replace(/([a-z])([A-Z])/g, '$1 $2'),
-        }))
+        return formatMenuSourceName(name)
     }
 
     async buildMenu(
         tab: BaseTerminalTabComponent<BaseTerminalProfile>,
     ): Promise<MenuItemOptions[]> {
+        const sources = this.getSources()
         const excluded = new Set(
             getExcludedMenuProviders(this.config.store.tmuxPlugin.excludedMenuProviders),
         )
+        let labelsChanged = false
         const sections = await Promise.all(
-            this.getSources()
+            sources
                 .filter((source) => source.tmux || !excluded.has(source.id))
                 .map(async (source) => {
                     try {
                         const items = cleanSeparators(await source.getItems(tab))
                         const labels = items.map((item) => item.label).filter(Boolean)
-                        if (labels.length) this.labels.set(source.id, labels.join(' / '))
+                        const label = labels.join(' / ')
+                        if (!source.tmux && label && this.labels.get(source.id) !== label) {
+                            this.labels.set(source.id, label)
+                            labelsChanged = true
+                        }
                         return items
                     } catch (error) {
                         this.logger.warn(`Context menu provider ${source.id} failed`, error)
@@ -140,6 +183,14 @@ export class TmuxMenuService {
                     }
                 }),
         )
+        if (labelsChanged) {
+            this.config.store.tmuxPlugin.menuProviderLabels = [...this.labels].map(
+                ([id, label]) => ({ id, label }),
+            )
+            void this.config.save().catch((error) => {
+                this.logger.warn('Failed to save menu titles', error)
+            })
+        }
         return cleanSeparators(
             sections.reduce<MenuItemOptions[]>(
                 (items, section) => items.concat(section, { type: 'separator' }),

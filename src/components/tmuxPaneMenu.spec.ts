@@ -52,6 +52,7 @@ describe('tmux pane menu integration', () => {
             {
                 store: { tmuxPlugin: {} },
                 enabledServices: (sources: unknown[]) => sources,
+                save: vi.fn().mockResolvedValue(undefined),
             } as unknown as ConfigService,
             { create: () => ({ warn: vi.fn() }) } as unknown as LogService,
             [tmuxProvider, plugin as unknown as TabContextMenuItemProvider],
