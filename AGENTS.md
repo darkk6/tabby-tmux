@@ -66,6 +66,26 @@ pnpm run watch  # 开发模式（监听文件变化）
 pnpm run build  # 生产构建
 ```
 
+### Commit 规范
+
+- 使用 Conventional Commits 格式：`<type>(<scope>): <description>`，`scope` 可省略。
+- `type` 使用小写：`feat`（新功能）、`fix`（修复问题）、`docs`（文档）、`refactor`（重构）、`perf`（性能优化）、`test`（测试）、`style`（格式调整）、`build`（构建或依赖）、`ci`（持续集成）、`chore`（其他维护）。
+- `scope` 使用受影响的模块名，如 `parser`、`layout`、`hotkeys`；跨模块变更可省略。
+- 标题使用英文，以祈使语气简明描述变更，首字母小写，末尾不加句号；避免 `update`、`fix bug` 等含糊描述。
+- 每个 commit 只包含一个逻辑完整的变更，并包含相关测试和必要文档；不要混入无关修改。
+- 复杂变更在标题后空一行补充正文，说明变更原因、关键行为变化及验证结果；未执行的检查应如实注明。
+- 不兼容变更在 `type` 或 `scope` 后加 `!`，并在正文中通过 `BREAKING CHANGE:` 说明影响和迁移方式。
+- 提交前检查暂存区 diff，确保没有误提交本地配置、敏感信息或生成产物；代码变更需通过相关测试，以及 `pnpm run lint`、`pnpm run typecheck`、`pnpm run format:check` 和 `pnpm run build`。
+- 发布工具生成的纯版本号 commit（如 `1.5.1`）沿用现有发布流程。
+
+示例：
+
+```text
+feat(hotkeys): add shortcut to switch tmux windows
+fix: preserve pane colors when restoring snapshots
+docs: document commit conventions
+```
+
 ### 参考资料
 
 - `ref/iterm2-tmux-integration.md` — iTerm2 参考文档
