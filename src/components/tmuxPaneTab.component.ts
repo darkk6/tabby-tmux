@@ -480,7 +480,7 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
         this.setSession(paneSession, true)
 
         // Start the session (restores history) non-blocking.
-        // History is written to the terminal via emitOutput → write().
+        // History reaches write() via output$, bypassing live session middleware.
         // start() is exception-safe (it always flushes buffered output), but a
         // rejection must never go unhandled: it used to leave the pane blank
         // with no diagnostic.

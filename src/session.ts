@@ -201,9 +201,14 @@ export class TmuxPaneSession extends BaseSession {
         return null
     }
 
-    /** Captured cells are independent of any incomplete live title sequence. */
+    /** Restore captured terminal cells independently of live output processing. */
     feedSnapshot(data: Buffer): void {
-        if (!this._destroyed) this.emitOutput(data)
+        if (this._destroyed) return
+        // Snapshots can contain protocol markers from completed file transfers.
+        // Deliver them after the middleware chain so plugins such as trzsz do
+        // not interpret captured history as a new live transfer.
+        this.output.next(data.toString('utf-8'))
+        this.binaryOutput.next(data)
     }
 
     /**

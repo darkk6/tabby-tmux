@@ -14,14 +14,19 @@ vi.mock('tabby-terminal', async () => {
     const { Subject } = await import('rxjs')
     return {
         BaseSession: class {
-            output$ = new Subject<Buffer>()
+            protected output = new Subject<string>()
+            protected binaryOutput = new Subject<Buffer>()
+            output$ = this.output.asObservable()
+            binaryOutput$ = this.binaryOutput.asObservable()
             open = true
             constructor(protected logger: Logger) {}
             protected emitOutput(data: Buffer): void {
-                this.output$.next(data)
+                this.output.next(data.toString())
+                this.binaryOutput.next(data)
             }
             async destroy(): Promise<void> {
-                this.output$.complete()
+                this.output.complete()
+                this.binaryOutput.complete()
             }
         },
     }

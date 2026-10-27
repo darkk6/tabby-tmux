@@ -11,17 +11,27 @@ vi.mock('tabby-terminal', async () => {
     const { Subject } = await import('rxjs')
     class MockBaseSession {
         open = false
-        output$ = new Subject<Buffer>()
+        protected output = new Subject<string>()
+        protected binaryOutput = new Subject<Buffer>()
+        output$ = this.output.asObservable()
+        binaryOutput$ = this.binaryOutput.asObservable()
+        middleware = {
+            feedFromSession: (data: Buffer) => {
+                this.output.next(data.toString())
+                this.binaryOutput.next(data)
+            },
+        }
         protected logger: unknown
         constructor(logger: unknown) {
             this.open = true
             this.logger = logger
         }
         protected emitOutput(data: Buffer): void {
-            this.output$.next(data)
+            this.middleware.feedFromSession(data)
         }
         async destroy(): Promise<void> {
-            this.output$.complete()
+            this.output.complete()
+            this.binaryOutput.complete()
         }
     }
     return { BaseSession: MockBaseSession }
@@ -178,6 +188,68 @@ describe('TmuxPaneSession', () => {
         })
         const { emitted } = await startSession(session)
         expect(emitted.map(String)).toEqual(['frame', 'new output'])
+    })
+
+    it.each([false, true])(
+        'renders completed trzsz transfers without triggering middleware during refresh=%s',
+        async (refresh) => {
+            const { session, controller } = createSession()
+            if (refresh) await startSession(session)
+
+            const marker = '::TRZSZ:TRANSFER:R:1.3.0:0291256133200:40323'
+            const history = Buffer.from(
+                `\x1b[32m已完成\x1b[0m\r\n${marker}\r\n#SUCC:1024\r\nshell$ `,
+            )
+            const live = Buffer.from('live output')
+            const emitted: string[] = []
+            const binary: Buffer[] = []
+            session.output$.subscribe((data) => emitted.push(data))
+            session.binaryOutput$.subscribe((data) => binary.push(data))
+
+            const chooseFiles = vi.fn()
+            const forwardOutput = session.middleware.feedFromSession.bind(session.middleware)
+            const middleware = vi
+                .spyOn(session.middleware, 'feedFromSession')
+                .mockImplementation((data) => {
+                    if (data.includes(marker)) chooseFiles()
+                    else forwardOutput(data)
+                })
+            vi.mocked(controller.restorePaneHistory).mockImplementationOnce(async () => {
+                session.feedSnapshot(history)
+                session.feedOutput(Buffer.from(marker), 2)
+                session.feedOutput(live, 3)
+                return 2
+            })
+
+            const restoring = refresh ? session.screenBufferChanged('normal') : session.start()
+            session.gridApplied()
+            await restoring
+
+            expect(chooseFiles).not.toHaveBeenCalled()
+            expect(emitted).toEqual([history.toString(), live.toString()])
+            expect(binary).toEqual([history, live])
+            expect(middleware).toHaveBeenCalledExactlyOnceWith(live)
+
+            // A new live transfer must still reach the file-transfer middleware.
+            session.feedOutput(Buffer.from(marker))
+            expect(chooseFiles).toHaveBeenCalledOnce()
+            expect(middleware).toHaveBeenCalledTimes(2)
+        },
+    )
+
+    it('does not deliver snapshots after the pane is destroyed', async () => {
+        const { session } = createSession()
+        const { emitted } = await startSession(session)
+        const binary: Buffer[] = []
+        session.binaryOutput$.subscribe((data) => binary.push(data))
+        const middleware = vi.spyOn(session.middleware, 'feedFromSession')
+        await session.destroy()
+
+        session.feedSnapshot(Buffer.from('obsolete snapshot'))
+
+        expect(emitted).toEqual([])
+        expect(binary).toEqual([])
+        expect(middleware).not.toHaveBeenCalled()
     })
 
     it('does not restore or flush output into a destroyed pane after capture completes', async () => {
