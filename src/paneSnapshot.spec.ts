@@ -262,7 +262,7 @@ describe('pane snapshot restoration in xterm', () => {
         frame.state.columns = 120
 
         const terminal = await restore(frame)
-        const restoredScreen = screen(terminal)
+        const restoredScreen = screen(terminal).map((row) => row.trimEnd())
 
         expect(restoredScreen).toEqual([
             'trz -B 10K',
@@ -271,9 +271,127 @@ describe('pane snapshot restoration in xterm', () => {
             '',
             'Saved 1 file/directory to /Users/ruan',
             '- 192.168.194.216.har.0',
-            'shell$ ',
+            'shell$',
             '',
         ])
+    })
+
+    it('preserves physical rows and the input position when masking a wrapped protocol line', async () => {
+        const frame = snapshot({
+            normalScreen: 'cmd\n#DATA:ABCDEFGHIJKLMNOPQRSTUVWX\nSaved\n$ ',
+            alternateScreen: null,
+        })
+        Object.assign(frame.state, {
+            alternateOn: false,
+            rows: 6,
+            columns: 12,
+            cursorX: 2,
+            cursorY: 5,
+        })
+
+        const terminal = await restore(frame)
+        expect(screen(terminal).map((row) => row.trimEnd())).toEqual([
+            'cmd',
+            '',
+            '',
+            '',
+            'Saved',
+            '$',
+        ])
+        expect(terminal.buffer.normal.baseY).toBe(0)
+        expect(terminal.buffer.normal.cursorY).toBe(5)
+        await write(terminal, 'X')
+        expect(screen(terminal)[5]).toBe('$ X')
+    })
+
+    it.each([false, true])(
+        'masks protocol continuations across the history boundary with earlier history=%s',
+        async (earlierHistory) => {
+            const frame = snapshot({
+                scrollback: (earlierHistory ? 'older\n' : '') + '#DATA:ABCDEFGHIJKLMNOPQR',
+                normalScreen: 'STUVWXYZ0123456789\nSaved\n$ ',
+                historyJoinsScreen: true,
+                alternateScreen: null,
+            })
+            Object.assign(frame.state, {
+                alternateOn: false,
+                rows: 4,
+                columns: 12,
+                cursorX: 2,
+                cursorY: 3,
+            })
+
+            const terminal = await restore(frame)
+            expect(screen(terminal).map((row) => row.trimEnd())).toEqual(['', '', 'Saved', '$'])
+            expect(terminal.buffer.normal.baseY).toBe(earlierHistory ? 1 : 0)
+            if (earlierHistory) {
+                expect(terminal.buffer.normal.getLine(0)?.translateToString(true)).toBe('older')
+            }
+            await write(terminal, 'X')
+            expect(screen(terminal)[3]).toBe('$ X')
+        },
+    )
+
+    it.each(['scrollback', 'normalScreen'] as const)(
+        'preserves SGR changes carried by filtered protocol lines in %s',
+        async (buffer) => {
+            const colored = '\x1b[31mred\n\x1b[39m#SUCC:10\nSaved'
+            const frame = snapshot({
+                scrollback: buffer === 'scrollback' ? colored : null,
+                normalScreen: buffer === 'normalScreen' ? colored + '\n$ \n\n' : '$ \n\n',
+                alternateScreen: null,
+            })
+            frame.state.alternateOn = false
+            frame.state.rows = buffer === 'normalScreen' ? 6 : 3
+
+            const terminal = await restore(frame)
+            const restored = terminal.buffer.normal
+            const savedRow = Array.from({ length: restored.length }, (_, row) => row).find(
+                (row) => restored.getLine(row)?.translateToString(true) === 'Saved',
+            )
+            expect(savedRow).toBeDefined()
+            expect(
+                restored
+                    .getLine(savedRow ?? -1)
+                    ?.getCell(0)
+                    ?.isFgDefault(),
+            ).toBe(true)
+            expect(restored.getLine(0)?.getCell(0)?.getFgColor()).toBe(1)
+        },
+    )
+
+    it('recognizes a protocol header split across the history boundary', async () => {
+        const frame = snapshot({
+            scrollback: 'older\n          #D',
+            normalScreen: 'ATA:12\nSaved\n$ \n',
+            historyJoinsScreen: true,
+            alternateScreen: null,
+        })
+        Object.assign(frame.state, {
+            alternateOn: false,
+            columns: 12,
+            rows: 4,
+            cursorX: 2,
+            cursorY: 2,
+        })
+
+        const terminal = await restore(frame)
+        expect(screen(terminal).map((row) => row.trimEnd())).toEqual(['', 'Saved', '$', ''])
+        expect(terminal.buffer.normal.baseY).toBe(1)
+        expect(terminal.buffer.normal.getLine(0)?.translateToString(true)).toBe('older')
+    })
+
+    it('does not restore an empty history row when all captured history is protocol', async () => {
+        const frame = snapshot({
+            scrollback: '#SUCC:10240',
+            normalScreen: 'screen\n\n',
+            alternateScreen: null,
+        })
+        frame.state.alternateOn = false
+
+        const terminal = await restore(frame)
+        expect(terminal.buffer.normal.baseY).toBe(0)
+        expect(screen(terminal)).toEqual(['screen', '', ''])
     })
 
     it('preserves a soft wrap across the scrollback/visible-screen boundary', async () => {

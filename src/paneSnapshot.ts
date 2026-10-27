@@ -20,19 +20,53 @@ const csi = (value: string) => `\x1b[${value}`
  * trzsz writes its transfer protocol into the pane before restoring the
  * cursor and clearing the visible screen. Lines that already reached tmux's
  * scrollback survive that clear and would otherwise be replayed as user text.
- * In the active screen, blank matching rows in place to preserve screen and
- * cursor coordinates; in scrollback, remove the rows from restored history.
+ * Keep SGR transitions when removing history records: capture-pane emits
+ * attribute differences across rows, which later retained rows depend on.
+ * Mask normal-screen records with spaces instead of removing their text so
+ * xterm reproduces their physical rows and soft wraps at the captured width.
  */
-function filterTrzszProtocolLines(content: string, preserveRows = false): string {
+function filterTrzszProtocol(
+    snapshot: PaneSnapshot,
+): Pick<PaneSnapshot, 'scrollback' | 'normalScreen' | 'historyJoinsScreen'> {
+    const sgr = /\x1b\[[0-9;:]*m/g
     const protocolLine = /^[\t ]*(?:::TRZSZ:TRANSFER:|#(?:CFG|NUM|NAME|SIZE|DATA|MD5|SUCC|FAIL):)/
-    return content
-        .split('\n')
-        .map((line) => {
-            if (!protocolLine.test(line.replace(/\x1b\[[0-9;:]*m/g, ''))) return line
-            return preserveRows ? '' : null
+    const isProtocolLine = (line: string) => protocolLine.test(line.replace(sgr, ''))
+    const history = snapshot.scrollback === null ? [] : snapshot.scrollback.split('\n')
+    const screenLines = snapshot.normalScreen.split('\n')
+    // -J joins wraps within each capture, but not between the two captures.
+    // A protocol prefix in history can identify an unmarked screen suffix.
+    const protocolJoinsScreen =
+        snapshot.historyJoinsScreen &&
+        history.length > 0 &&
+        isProtocolLine(history[history.length - 1] + screenLines[0])
+
+    const retainedHistory: string[] = []
+    let pendingSGR = ''
+    for (const [index, line] of history.entries()) {
+        if (isProtocolLine(line) || (index === history.length - 1 && protocolJoinsScreen)) {
+            pendingSGR += (line.match(sgr) ?? []).join('')
+        } else {
+            retainedHistory.push(pendingSGR + line)
+            pendingSGR = ''
+        }
+    }
+
+    const normalScreen = screenLines
+        .map((line, index) => {
+            if (!isProtocolLine(line) && !(index === 0 && protocolJoinsScreen)) return line
+            // Protocol payloads and capture-pane's indentation are ASCII.
+            // Preserve each cell's width and all zero-width color sequences.
+            return line.replace(/\x1b\[[0-9;:]*m|./g, (part) =>
+                part.startsWith('\x1b') ? part : ' ',
+            )
         })
-        .filter((line): line is string => line !== null)
         .join('\n')
+
+    return {
+        scrollback: retainedHistory.length > 0 ? retainedHistory.join('\n') : null,
+        normalScreen,
+        historyJoinsScreen: snapshot.historyJoinsScreen && !protocolJoinsScreen,
+    }
 }
 
 /**
@@ -91,6 +125,7 @@ function drawAlternateScreen(content: string, rows: number): string {
 
 export function buildSnapshotRestore(snapshot: PaneSnapshot): string {
     const { state } = snapshot
+    const { scrollback, normalScreen, historyJoinsScreen } = filterTrzszProtocol(snapshot)
     // Select normal first, then erase an earlier local restoration, including
     // its scrollback. Restore in neutral modes; apply the captured modes last.
     let result =
@@ -104,14 +139,13 @@ export function buildSnapshotRestore(snapshot: PaneSnapshot): string {
         csi('3J') +
         csi('H')
 
-    if (snapshot.scrollback !== null) {
-        result += restoreLogicalContent(filterTrzszProtocolLines(snapshot.scrollback)) + csi('0m')
-        if (!snapshot.historyJoinsScreen) result += '\r\n'
+    if (scrollback !== null) {
+        result += restoreLogicalContent(scrollback) + csi('0m')
+        if (!historyJoinsScreen) result += '\r\n'
     }
     // Do not trim/deduplicate captured rows: blank rows and repeated content
     // are real terminal data. Reset SGR at the separately captured boundary.
-    result +=
-        csi('0m') + restoreLogicalContent(filterTrzszProtocolLines(snapshot.normalScreen, true))
+    result += csi('0m') + restoreLogicalContent(normalScreen)
 
     if (snapshot.alternateScreen !== null) {
         // 1049 saves the normal cursor for the application's eventual rmcup.
