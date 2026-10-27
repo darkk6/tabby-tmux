@@ -66,7 +66,9 @@ xterm 前端(`xtermFrontend.ts`)在 keydown 时对命中热键 `preventDefault` 
 
 ### window 层:HotkeyProvider 注册
 
-`TmuxHotkeyProvider` 的 `provide()` 返回 `tmuxPlugin.*` 动作描述;`config.ts` 的 `TmuxConfigProvider` 提供嵌套默认键位 `hotkeys.tmuxPlugin.*`。Tabby 的 `getHotkeysConfigRecursive` 原生支持嵌套,emit 的热键 id 为 `tmuxPlugin.xxx`。路由分两处:**window 切换/新建**由 `TmuxSessionTabComponent` 订阅 `hotkey$` 按 id 路由(需要会话存在);**`toggle-tmux-mode`** 由 `TmuxService` 全局订阅(进入方向在会话不存在时触发,必须全局可达):已连接 → `disconnect()`,未连接 → 从 `AppService.activeTab` 解析当前终端 tab 并 `attachToTerminal`。
+`TmuxHotkeyProvider` 的 `provide()` 返回 `tmuxPlugin.*` 动作描述;`config.ts` 的 `TmuxConfigProvider` 提供嵌套默认键位 `hotkeys.tmuxPlugin.*`。Tabby 的 `getHotkeysConfigRecursive` 原生支持嵌套,emit 的热键 id 为 `tmuxPlugin.xxx`。路由分两处:**window 切换/新建**由 `TmuxSessionTabComponent` 订阅 `hotkey$` 按 id 路由(需要会话存在);**`toggle-tmux-mode`** 由 `TmuxService` 全局订阅(进入方向在会话不存在时触发,必须全局可达),从 `AppService.activeTab` 沿 focused child 解析当前目标:tmux session tab → `disconnectContext()` 仅断开该 session;普通终端 → `attachToTerminal()` 进入 tmux mode,不受其他页签连接状态影响;非终端 tab → 不执行操作。解析到 tmux session tab 后停止,不继续进入其 pane。
+
+切换锁按 host terminal 隔离,同一 session tab 及恢复后的原终端共用一把锁。某个终端等待旧 Control Mode 结束时,其他终端仍可切换。重新 attach 的等待沿用 `commandTimeoutMs`,超时仅结束本次尝试并记录日志,继续拦截旧协议输出;结束标记到达后可重试。attach 初始化完成并替换页签、detach 清理完成并恢复原终端时,若用户已切换到其他页签,保留当前选择,避免后台完成操作抢走焦点。
 
 ## 设置表单决策
 
@@ -91,6 +93,10 @@ Tabby 热键是全局的:新注册的 `tmuxPlugin.*` 组合键在**普通终端*
 - [ ] 按 `Ctrl-Shift-1..9` 跳转 window
 - [ ] 按 `Ctrl-Shift-B` 新建 window
 - [ ] 按 `Ctrl-Shift-X` 切换 tmux mode：tmux mode 中按下 → 退出并恢复原终端 tab;普通终端中按下 → 进入 tmux mode
+- [ ] 页签 A 进入 tmux mode 后,切换到普通终端页签 B 按 `Ctrl-Shift-X` → B 进入 tmux mode,A 保持连接;在 B 再按一次 → 仅 B 退出,A 保持连接
+- [ ] 已有 tmux session 时,在设置页按 `Ctrl-Shift-X` → 不断开 session、不切换页签
+- [ ] 在 A 启动 attach 后立即切换到 B,B 先初始化完成或 A 延迟初始化完成时,当前页签始终保留在 B;下一次快捷键仍作用于 B
+- [ ] 在 A 退出 tmux mode 的清理完成前切换到 B,A 恢复原终端后仍保留当前页签 B
 - [ ] Tabby Settings → Hotkeys 出现 `tmuxPlugin.*` 条目,改键后新键生效
 - [ ] 普通终端按 `Ctrl-Shift-[` 无输入泄漏(无字符进入 shell)
 - [ ] 非 tmux 模式按 `Ctrl-Shift-W` 仍关闭 Tabby tab

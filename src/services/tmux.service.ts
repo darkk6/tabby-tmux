@@ -124,8 +124,8 @@ export class TmuxService {
 
     /**
      * The tmuxPlugin.toggle-tmux-mode hotkey toggles tmux mode based on the
-     * current state: connected → detach, idle → attach from the active
-     * terminal tab. It must live on the service (not the session tab) because
+     * active tab: tmux session → detach that session, terminal → attach.
+     * It must live on the service (not the session tab) because
      * the "enter" direction fires while no session tab exists.
      */
     private setupToggleHotkey(): void {
@@ -188,6 +188,7 @@ export class TmuxService {
             // Find the topmost parent tab (the actual tab listed in the top tab bar)
             const topmostTab = context.terminalTab.topmostParent || context.terminalTab
             context.topmostTab = topmostTab
+            const activeTab = this.appService.activeTab
 
             // Remember the original index so we can replace in-place
             const tabs: any[] = (this.appService as any).tabs
@@ -231,6 +232,13 @@ export class TmuxService {
                     tabs.splice(origIndex, 1)
                     ;(this.appService as any).tabsChanged.next()
                 }
+            }
+
+            // Initialization can finish after the user has moved to another
+            // terminal. openNewTabRaw selects the new tab, so restore the
+            // user's selection when replacing a background terminal.
+            if (activeTab && activeTab !== topmostTab && tabs.includes(activeTab)) {
+                this.appService.selectTab(activeTab)
             }
         })
 
@@ -279,6 +287,12 @@ export class TmuxService {
 
         await context.controller.destroy()
 
+        // The user may have switched tabs while the controller was closing.
+        // Check before destroying the session tab, since Tabby selects a
+        // fallback tab as part of removing the active tab.
+        const activateRestoredTab =
+            !this.appService.activeTab || this.resolveActiveTmuxTarget() === context.sessionTab
+
         // Destroy the session tab (removes from tab bar)
         if (context.sessionTab) {
             await context.sessionTab.destroy()
@@ -300,8 +314,9 @@ export class TmuxService {
                 tabs.splice(insertAt, 0, context.topmostTab)
                 ;(this.appService as any).tabsChanged.next()
 
-                // Activate the restored tab
-                ;(this.appService as any).selectTab(context.topmostTab)
+                if (activateRestoredTab) {
+                    this.appService.selectTab(context.topmostTab)
+                }
             }
         })
 
@@ -318,47 +333,48 @@ export class TmuxService {
     }
 
     /**
-     * Toggle tmux mode based on the current state (bound to
+     * Toggle tmux mode for the active tab (bound to
      * tmuxPlugin.toggle-tmux-mode, default Ctrl+Shift+X):
-     * - connected → detach and restore the original tabs
-     * - idle → attach from the currently active terminal tab (if any)
+     * - tmux session → detach only that session and restore its original tab
+     * - terminal → attach from the focused terminal, even if other sessions exist
      *
-     * Guarded by an in-flight flag: disconnect() is async and detaches the
-     * original tab synchronously, so a rapid double-fire of the hotkey would
-     * otherwise re-enter with isConnected already false and stack a second
-     * interceptor/controller on the same PTY.
+     * Serialize toggles per host terminal, including the session tab and its
+     * restored terminal. A slow detach must not block unrelated terminals.
      */
-    private toggleInFlight = false
+    private togglingTerminals = new WeakSet<object>()
 
     async toggleTmuxMode(): Promise<void> {
-        if (this.toggleInFlight) {
+        const tab = this.resolveActiveTmuxTarget()
+        if (!tab) return
+        const context =
+            tab instanceof TmuxSessionTabComponent ? this.findContextForTab(tab) : undefined
+        if (tab instanceof TmuxSessionTabComponent && !context) return
+        const terminal = context?.terminalTab ?? tab
+        if (this.togglingTerminals.has(terminal)) {
             return
         }
-        this.toggleInFlight = true
+        this.togglingTerminals.add(terminal)
         try {
-            if (this.isConnected) {
-                await this.disconnect()
-                return
-            }
-            const tab = this.resolveActiveTerminalTab()
-            if (tab) {
+            if (context) {
+                await this.disconnectContext(context)
+            } else if (tab instanceof BaseTerminalTabComponent) {
                 await this.attachToTerminal(tab)
             }
         } finally {
-            this.toggleInFlight = false
+            this.togglingTerminals.delete(terminal)
         }
     }
 
     /**
-     * Resolve the terminal tab the user is currently focused on, walking down
-     * from the active top-level tab (which may be a SplitTab wrapper) to its
-     * focused child. Returns null when the active tab is not a terminal
-     * (settings page, welcome tab, etc.) — the toggle then does nothing.
+     * Walk down the active tab's focused children to a tmux session or terminal.
+     * Stop at the session tab so its pane terminals never become attach targets.
+     * Non-terminal tabs (settings, welcome, etc.) have no toggle target.
      */
-    private resolveActiveTerminalTab(): BaseTerminalTabComponent<any> | null {
+    private resolveActiveTmuxTarget():
+        TmuxSessionTabComponent | BaseTerminalTabComponent<any> | null {
         let tab: any = this.appService.activeTab
         for (let depth = 0; tab && depth < 8; depth++) {
-            if (tab instanceof BaseTerminalTabComponent) {
+            if (tab instanceof TmuxSessionTabComponent || tab instanceof BaseTerminalTabComponent) {
                 return tab
             }
             tab = tab.focusedTab
@@ -375,11 +391,28 @@ export class TmuxService {
         // UI teardown may finish before tmux has drained its capture responses.
         // A new shell command must wait until the previous -CC DCS has ended.
         const draining = this.drainingTerminals.get(terminalTab)
-        if (draining) await draining
+        if (draining) {
+            let timer: ReturnType<typeof setTimeout> | undefined
+            try {
+                await Promise.race([
+                    draining,
+                    new Promise<void>((_, reject) => {
+                        timer = setTimeout(() => {
+                            reject(new Error('Previous tmux Control Mode has not exited'))
+                        }, this.configService.store.tmuxPlugin?.commandTimeoutMs ?? 30_000)
+                    }),
+                ])
+            } catch (error) {
+                this.logger.warn('Cannot attach while the previous tmux client is exiting:', error)
+                return
+            } finally {
+                clearTimeout(timer)
+            }
+        }
 
         // Re-entrancy guard: if this terminal tab is already attached to a
         // session, don't stack a second interceptor / controller / `tmux -CC`
-        // write on the same PTY (defensive — toggleTmuxMode's in-flight flag
+        // write on the same PTY (defensive — toggleTmuxMode's per-terminal lock
         // covers the hotkey path; this covers direct callers).
         for (const ctx of this.sessions) {
             if (ctx.terminalTab === terminalTab) {

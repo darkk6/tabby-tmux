@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Subject } from 'rxjs'
 import type { AppService, ConfigService, HotkeysService, LogService, Logger } from 'tabby-core'
 import { BaseTerminalTabComponent } from 'tabby-terminal'
+import { TmuxSessionTabComponent } from './components/tmuxSessionTab.component'
 import { TmuxService, SessionContext, TmuxOutputInterceptor } from './services/tmux.service'
 
 // tabby-core / tabby-terminal / tabby components are Angular partially-compiled
@@ -93,17 +94,20 @@ function createService() {
     const tabs: any[] = []
     const tabsChanged = new Subject<void>()
     const openNewTabRaw = vi.fn((params: any) => {
-        const tab = {
+        const tab = Object.assign(Object.create(TmuxSessionTabComponent.prototype), {
             destroyed$: new Subject(),
             destroy: vi.fn(),
             ...params.inputs,
             // Record whether the tab was created inside the Angular zone
             createdInsideZone: zone.isInsideZone(),
-        }
+        })
         tabs.push(tab)
+        ;(appService as any).activeTab = tab
         return tab
     })
-    const selectTab = vi.fn()
+    const selectTab = vi.fn((tab) => {
+        ;(appService as any).activeTab = tab
+    })
     const appService = {
         tabs,
         tabsChanged,
@@ -130,7 +134,17 @@ function createService() {
         logService,
         hotkeysService,
     )
-    return { service, appService, zone, tabs, openNewTabRaw, selectTab, logger, hotkeysService }
+    return {
+        service,
+        appService,
+        zone,
+        tabs,
+        openNewTabRaw,
+        selectTab,
+        logger,
+        hotkeysService,
+        configService,
+    }
 }
 
 function createContext(topmostParent?: any): SessionContext {
@@ -193,9 +207,84 @@ describe('TmuxService', () => {
 
             expect(tabs[0].hostProfile).toBe(hostProfile)
         })
+
+        it.each([false, true])(
+            'keeps the second tab active when the first attach initializes late (second initialized: %s)',
+            async (secondInitialized) => {
+                const { service, appService, tabs } = createService()
+                const firstOriginal = { name: 'first' }
+                const secondTerminal = Object.create(BaseTerminalTabComponent.prototype)
+                const secondOriginal = { name: 'second', focusedTab: secondTerminal }
+                const first = createContext(firstOriginal)
+                const second = createContext(secondOriginal)
+                ;(service as any).sessions.add(first)
+                ;(service as any).sessions.add(second)
+                tabs.push(firstOriginal, secondOriginal)
+                ;(appService as any).activeTab = secondOriginal
+                if (secondInitialized) {
+                    ;(service as any).replaceWithSessionTab(second)
+                }
+                const activeBefore = appService.activeTab
+
+                ;(service as any).replaceWithSessionTab(first)
+
+                expect(appService.activeTab).toBe(activeBefore)
+                expect(tabs).toEqual([first.sessionTab, second.sessionTab ?? secondOriginal])
+
+                const attach = vi.spyOn(service, 'attachToTerminal').mockResolvedValue(undefined)
+                const detach = vi.spyOn(service, 'disconnectContext').mockResolvedValue(undefined)
+                await service.toggleTmuxMode()
+                if (secondInitialized) {
+                    expect(detach).toHaveBeenCalledExactlyOnceWith(second)
+                    expect(attach).not.toHaveBeenCalled()
+                } else {
+                    expect(attach).toHaveBeenCalledExactlyOnceWith(secondTerminal)
+                    expect(detach).not.toHaveBeenCalled()
+                }
+            },
+        )
     })
 
     describe('disconnectContext', () => {
+        it('bounds both hotkey and direct reattach waits and permits retry after a late DCS end', async () => {
+            vi.useFakeTimers()
+            try {
+                const { service, appService, configService, logger } = createService()
+                configService.store.tmuxPlugin.commandTimeoutMs = 25
+                const context = createContext()
+                Object.setPrototypeOf(context.terminalTab, BaseTerminalTabComponent.prototype)
+                const session = context.terminalTab.session
+                session.write = vi.fn()
+                const interceptor = new TmuxOutputInterceptor()
+                context.outputInterceptor = interceptor
+                interceptor.feedFromSession(Buffer.from('\x1bP1000p'))
+                await service.disconnectContext(context)
+                ;(appService as any).activeTab = context.terminalTab
+
+                const hotkey = service.toggleTmuxMode()
+                const menu = service.attachToTerminal(context.terminalTab)
+                await vi.advanceTimersByTimeAsync(25)
+                await Promise.all([hotkey, menu])
+
+                expect(logger.warn).toHaveBeenCalledTimes(2)
+                expect(session.write).not.toHaveBeenCalled()
+                expect(session.middleware.remove).not.toHaveBeenCalled()
+                interceptor.feedFromSession(Buffer.from('%exit\r\n\x1b\\'))
+                await service.toggleTmuxMode()
+                expect(session.write).toHaveBeenCalledOnce()
+                expect(vi.getTimerCount()).toBe(0)
+
+                const nextInterceptor = vi.mocked(session.middleware.unshift).mock
+                    .calls[0][0] as TmuxOutputInterceptor
+                nextInterceptor.feedFromSession(Buffer.from('\x1bP1000p'))
+                await service.disconnect()
+                nextInterceptor.feedFromSession(Buffer.from('%exit\r\n\x1b\\'))
+                await nextInterceptor.controlModeEnded
+            } finally {
+                vi.useRealTimers()
+            }
+        })
+
         it('waits for the previous Control Mode to end before reattaching the same terminal', async () => {
             const { service } = createService()
             const context = createContext()
@@ -265,6 +354,38 @@ describe('TmuxService', () => {
             expect(selectTab).toHaveBeenCalledWith(originalTab)
         })
 
+        it.each([false, true])(
+            'preserves the selected tab when disconnect finishes (switched during cleanup: %s)',
+            async (switchDuringCleanup) => {
+                const { service, appService, selectTab, tabs } = createService()
+                const originalTab = { name: 'original' }
+                const otherTab = { name: 'other' }
+                const context = createContext(originalTab)
+                ;(service as any).replaceWithSessionTab(context)
+                tabs.push(otherTab)
+                selectTab.mockClear()
+                let finishCleanup: (() => void) | undefined
+                vi.mocked(context.controller.destroy).mockImplementation(
+                    () =>
+                        new Promise<void>((resolve) => {
+                            finishCleanup = resolve
+                        }),
+                )
+                if (!switchDuringCleanup) {
+                    ;(appService as any).activeTab = otherTab
+                }
+
+                const disconnect = service.disconnectContext(context)
+                ;(appService as any).activeTab = otherTab
+                finishCleanup?.()
+                await disconnect
+
+                expect(tabs).toContain(originalTab)
+                expect(appService.activeTab).toBe(otherTab)
+                expect(selectTab).not.toHaveBeenCalled()
+            },
+        )
+
         it('disconnects when Tabby destroys the session tab directly', async () => {
             const { service, tabs } = createService()
             const originalTab = { name: 'original' }
@@ -294,14 +415,109 @@ describe('TmuxService', () => {
             expect(attachSpy).toHaveBeenCalledWith(terminal)
         })
 
-        it('disconnects when already connected', () => {
-            const { service } = createService()
-            ;(service as any).sessions.add(createContext())
-            const disconnectSpy = vi.spyOn(service, 'disconnect').mockResolvedValue(undefined)
+        it('attaches from the active terminal while another tab is connected', async () => {
+            const { service, appService, selectTab } = createService()
+            const context = createContext()
+            ;(service as any).sessions.add(context)
+            const terminal = Object.create(BaseTerminalTabComponent.prototype)
+            ;(appService as any).activeTab = { focusedTab: terminal }
+            const attachSpy = vi.spyOn(service, 'attachToTerminal').mockResolvedValue(undefined)
 
-            service.toggleTmuxMode()
+            await service.toggleTmuxMode()
 
-            expect(disconnectSpy).toHaveBeenCalled()
+            expect(attachSpy).toHaveBeenCalledWith(terminal)
+            expect(context.controller.gateway.detach).not.toHaveBeenCalled()
+            expect(selectTab).not.toHaveBeenCalled()
+        })
+
+        it.each([false, true])(
+            'disconnects only the active tmux session (wrapped: %s)',
+            async (wrapped) => {
+                const { service, appService, selectTab } = createService()
+                const inactive = createContext({ name: 'inactive' })
+                const active = createContext({ name: 'active' })
+                active.topmostTab = active.terminalTab.topmostParent
+                active.sessionTab = Object.create(TmuxSessionTabComponent.prototype)
+                active.sessionTab.destroy = vi.fn().mockResolvedValue(undefined)
+                ;(service as any).sessions.add(inactive)
+                ;(service as any).sessions.add(active)
+                ;(appService as any).activeTab = wrapped
+                    ? { focusedTab: active.sessionTab }
+                    : active.sessionTab
+
+                await service.toggleTmuxMode()
+
+                expect(active.controller.gateway.detach).toHaveBeenCalledOnce()
+                expect(selectTab).toHaveBeenCalledExactlyOnceWith(active.topmostTab)
+                expect(inactive.controller.gateway.detach).not.toHaveBeenCalled()
+                expect(service.isConnected).toBe(true)
+            },
+        )
+
+        it('does not attach to a pane inside an unowned tmux session tab', async () => {
+            const { service, appService } = createService()
+            const attachSpy = vi.spyOn(service, 'attachToTerminal').mockResolvedValue(undefined)
+            const sessionTab = Object.create(TmuxSessionTabComponent.prototype)
+            sessionTab.focusedTab = Object.create(BaseTerminalTabComponent.prototype)
+            ;(appService as any).activeTab = sessionTab
+
+            await service.toggleTmuxMode()
+
+            expect(attachSpy).not.toHaveBeenCalled()
+        })
+
+        it('ignores repeated toggles while detaching and permits the next toggle', async () => {
+            const { service, appService } = createService()
+            const context = createContext()
+            context.sessionTab = Object.create(TmuxSessionTabComponent.prototype)
+            ;(service as any).sessions.add(context)
+            ;(appService as any).activeTab = context.sessionTab
+            let finishDisconnect: (() => void) | undefined
+            const disconnectSpy = vi.spyOn(service, 'disconnectContext').mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        finishDisconnect = resolve
+                    }),
+            )
+            const attachSpy = vi.spyOn(service, 'attachToTerminal').mockResolvedValue(undefined)
+
+            const first = service.toggleTmuxMode()
+            const terminal = context.terminalTab
+            Object.setPrototypeOf(terminal, BaseTerminalTabComponent.prototype)
+            ;(appService as any).activeTab = terminal
+            await service.toggleTmuxMode()
+
+            expect(disconnectSpy).toHaveBeenCalledOnce()
+            expect(attachSpy).not.toHaveBeenCalled()
+            finishDisconnect?.()
+            await first
+            await service.toggleTmuxMode()
+            expect(attachSpy).toHaveBeenCalledExactlyOnceWith(terminal)
+        })
+
+        it('allows another terminal to toggle while the first terminal is waiting to detach', async () => {
+            const { service, appService } = createService()
+            const context = createContext()
+            context.sessionTab = Object.create(TmuxSessionTabComponent.prototype)
+            ;(service as any).sessions.add(context)
+            ;(appService as any).activeTab = context.sessionTab
+            let finishDisconnect: (() => void) | undefined
+            vi.spyOn(service, 'disconnectContext').mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        finishDisconnect = resolve
+                    }),
+            )
+            const attachSpy = vi.spyOn(service, 'attachToTerminal').mockResolvedValue(undefined)
+
+            const first = service.toggleTmuxMode()
+            const otherTerminal = Object.create(BaseTerminalTabComponent.prototype)
+            ;(appService as any).activeTab = otherTerminal
+            await service.toggleTmuxMode()
+
+            expect(attachSpy).toHaveBeenCalledExactlyOnceWith(otherTerminal)
+            finishDisconnect?.()
+            await first
         })
 
         it('attaches from a terminal nested inside the active split tab', () => {
@@ -326,15 +542,23 @@ describe('TmuxService', () => {
             expect(unshiftSpy).not.toHaveBeenCalled()
         })
 
-        it('ignores non-terminal active tabs', () => {
-            const { service, appService } = createService()
-            const attachSpy = vi.spyOn(service, 'attachToTerminal').mockResolvedValue(undefined)
-            ;(appService as any).activeTab = {} as any
+        it.each([false, true])(
+            'ignores non-terminal active tabs (connected: %s)',
+            async (connected) => {
+                const { service, appService } = createService()
+                const attachSpy = vi.spyOn(service, 'attachToTerminal').mockResolvedValue(undefined)
+                const context = createContext()
+                if (connected) {
+                    ;(service as any).sessions.add(context)
+                }
+                ;(appService as any).activeTab = {} as any
 
-            service.toggleTmuxMode()
+                await service.toggleTmuxMode()
 
-            expect(attachSpy).not.toHaveBeenCalled()
-        })
+                expect(attachSpy).not.toHaveBeenCalled()
+                expect(context.controller.gateway.detach).not.toHaveBeenCalled()
+            },
+        )
     })
 
     describe('toggle hotkey wiring', () => {
