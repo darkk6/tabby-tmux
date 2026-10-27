@@ -210,6 +210,72 @@ describe('pane snapshot restoration in xterm', () => {
         expect(screen(terminal)).toEqual(['prompt', '', ''])
     })
 
+    it('filters trzsz protocol rows from restored scrollback and preserves transfer summaries', async () => {
+        const frame = snapshot({
+            scrollback:
+                'before transfer\n' +
+                '                \x1b[32m#SUCC:20480\x1b[0m\n' +
+                '  ::TRZSZ:TRANSFER:R:1.3.0:0291256133200:40323\n' +
+                '#CFG:encoded-config\n' +
+                '#NUM:1\n' +
+                '#NAME:encoded-name\n' +
+                '#SIZE:20480\n' +
+                '#DATA:encoded-data\n' +
+                '#MD5:encoded-checksum\n' +
+                '#FAIL:encoded-error\n' +
+                'Saved 1 file/directory to /Users/ruan\n' +
+                'after transfer',
+            normalScreen: 'shell$ ',
+            alternateScreen: null,
+        })
+        frame.state.alternateOn = false
+        frame.state.columns = 120
+
+        const terminal = await restore(frame)
+        const buffer = terminal.buffer.normal
+        const restoredRows = Array.from({ length: buffer.baseY + terminal.rows }, (_, row) =>
+            buffer.getLine(row)?.translateToString(true),
+        )
+
+        expect(restoredRows.join('\n')).toContain('before transfer')
+        expect(restoredRows.join('\n')).toContain('Saved 1 file/directory to /Users/ruan')
+        expect(restoredRows.join('\n')).toContain('after transfer')
+        expect(restoredRows.join('\n')).toContain('shell$ ')
+        expect(restoredRows.join('\n')).not.toMatch(/#(?:SUCC|CFG|NUM|NAME|SIZE|DATA|MD5|FAIL):/)
+        expect(restoredRows.join('\n')).not.toContain('::TRZSZ:TRANSFER:')
+    })
+
+    it('blanks trzsz protocol rows in the restored normal screen without shifting later output', async () => {
+        const frame = snapshot({
+            scrollback: null,
+            normalScreen:
+                'trz -B 10K\n\n' +
+                '    #SUCC:10240\n' +
+                '       #SUCC:10240\n' +
+                'Saved 1 file/directory to /Users/ruan\n' +
+                '- 192.168.194.216.har.0\n' +
+                'shell$ ',
+            alternateScreen: null,
+        })
+        frame.state.alternateOn = false
+        frame.state.rows = 8
+        frame.state.columns = 120
+
+        const terminal = await restore(frame)
+        const restoredScreen = screen(terminal)
+
+        expect(restoredScreen).toEqual([
+            'trz -B 10K',
+            '',
+            '',
+            '',
+            'Saved 1 file/directory to /Users/ruan',
+            '- 192.168.194.216.har.0',
+            'shell$ ',
+            '',
+        ])
+    })
+
     it('preserves a soft wrap across the scrollback/visible-screen boundary', async () => {
         const frame = snapshot({
             scrollback: 'abcde',

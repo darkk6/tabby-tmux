@@ -131,23 +131,9 @@ iTerm2 也可能出现协议行可见的情况，但以下因素降低了可见�
 
 ### 修复方案
 
-在 `restorePaneHistory` 写入 xterm 之前，显式过滤 trzsz 协议数据。
+在构造 pane 快照恢复序列时，过滤 scrollback 中以 `::TRZSZ:TRANSFER:` 或 `#` 协议字段开头的行。协议字段包括 `#CFG`、`#NUM`、`#NAME`、`#SIZE`、`#DATA`、`#MD5`、`#SUCC` 和 `#FAIL`；匹配前忽略行首空格和 SGR 颜色序列，以覆盖带列偏移或颜色的捕获结果。
 
-trzsz 协议格式固定，每行以 `::TRZSZ:TRANSFER:` 或 `#` + 关键字 + `:` 开头（base64 编码）：
-
-```typescript
-// Remove trzsz protocol data from captured history.
-// tmux consumes the \x1b[s/\x1b[u/\x1b[0J sequences that trzsz uses
-// to hide protocol output, leaving raw protocol lines in scrollback
-// with column offsets that would not self-overlap on replay.
-if (history.includes('::TRZSZ:TRANSFER:')) {
-    history = history
-        .replace(/^[ \t]*::TRZSZ:TRANSFER:.*$/gm, '')
-        .replace(/^[ \t]*#(?:CFG|NUM|NAME|SIZE|DATA|MD5):.*$/gm, '')
-}
-```
-
-仅当检测到 `::TRZSZ:TRANSFER:` 时才执行过滤，避免对正常输出产生不必要的开销。
+normal screen 也会识别这些协议行，但将其清空并保留原行位置，避免后续完成提示和光标错位；alternate screen 不做处理。过滤不修改 tmux 保存的历史。普通传输完成提示（例如 `Saved 1 file/directory ...`）不属于协议字段，会继续保留。`#SUCC` 等协议行即使捕获范围内没有 `::TRZSZ:TRANSFER:` 头也会被独立过滤，因为历史上限可能刚好截掉传输头。
 
 ### 关于 `-J` 参数
 

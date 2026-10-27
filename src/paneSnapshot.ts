@@ -17,6 +17,25 @@ export interface PaneSnapshot {
 const csi = (value: string) => `\x1b[${value}`
 
 /**
+ * trzsz writes its transfer protocol into the pane before restoring the
+ * cursor and clearing the visible screen. Lines that already reached tmux's
+ * scrollback survive that clear and would otherwise be replayed as user text.
+ * In the active screen, blank matching rows in place to preserve screen and
+ * cursor coordinates; in scrollback, remove the rows from restored history.
+ */
+function filterTrzszProtocolLines(content: string, preserveRows = false): string {
+    const protocolLine = /^[\t ]*(?:::TRZSZ:TRANSFER:|#(?:CFG|NUM|NAME|SIZE|DATA|MD5|SUCC|FAIL):)/
+    return content
+        .split('\n')
+        .map((line) => {
+            if (!protocolLine.test(line.replace(/\x1b\[[0-9;:]*m/g, ''))) return line
+            return preserveRows ? '' : null
+        })
+        .filter((line): line is string => line !== null)
+        .join('\n')
+}
+
+/**
  * Capture newlines describe row boundaries, not the application's original
  * LF/SGR ordering. Scroll with the default background so xterm's BCE does not
  * fill newly allocated blank cells with the preceding row's last color.
@@ -86,12 +105,13 @@ export function buildSnapshotRestore(snapshot: PaneSnapshot): string {
         csi('H')
 
     if (snapshot.scrollback !== null) {
-        result += restoreLogicalContent(snapshot.scrollback) + csi('0m')
+        result += restoreLogicalContent(filterTrzszProtocolLines(snapshot.scrollback)) + csi('0m')
         if (!snapshot.historyJoinsScreen) result += '\r\n'
     }
     // Do not trim/deduplicate captured rows: blank rows and repeated content
     // are real terminal data. Reset SGR at the separately captured boundary.
-    result += csi('0m') + restoreLogicalContent(snapshot.normalScreen)
+    result +=
+        csi('0m') + restoreLogicalContent(filterTrzszProtocolLines(snapshot.normalScreen, true))
 
     if (snapshot.alternateScreen !== null) {
         // 1049 saves the normal cursor for the application's eventual rmcup.
