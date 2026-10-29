@@ -35,22 +35,25 @@ export class TmuxSessionNamePromptService {
             return null
         }
 
-        // Open inside the Angular zone: the hotkey path may arrive from a
-        // listener outside it, and the modal only renders on change detection.
-        const modalRef = this.zone.run(() =>
-            this.ngbModal.open(TmuxSessionNameDialogComponent, {
+        // Open and fill the dialog inside the Angular zone: the hotkey path
+        // may arrive from a listener outside it, and leaving zone.run()
+        // triggers change detection, so the inputs must be set before that
+        // first render or the prefilled name is not selected.
+        const modalRef = this.zone.run(() => {
+            const ref = this.ngbModal.open(TmuxSessionNameDialogComponent, {
                 backdrop: true,
                 keyboard: true,
                 centered: true,
-            }),
-        )
-        const dialog = modalRef.componentInstance as TmuxSessionNameDialogComponent
-        dialog.title = this.i18n.t('mode.enter')
-        dialog.label = this.i18n.t('sessionName.label')
-        dialog.invalidMessage = this.i18n.t('sessionName.invalid')
-        dialog.cancelLabel = this.i18n.t('common.cancel')
-        dialog.confirmLabel = this.i18n.t('common.confirm')
-        dialog.draft = this.configService.store?.tmuxPlugin?.defaultSessionName ?? 'default'
+            })
+            const dialog = ref.componentInstance as TmuxSessionNameDialogComponent
+            dialog.title = this.i18n.t('mode.enter')
+            dialog.label = this.i18n.t('sessionName.label')
+            dialog.invalidMessage = this.i18n.t('sessionName.invalid')
+            dialog.cancelLabel = this.i18n.t('common.cancel')
+            dialog.confirmLabel = this.i18n.t('common.confirm')
+            dialog.draft = this.configService.store?.tmuxPlugin?.defaultSessionName ?? 'default'
+            return ref
+        })
 
         this.pending = modalRef.result.then(
             (value) => (typeof value === 'string' && value ? value : null),
