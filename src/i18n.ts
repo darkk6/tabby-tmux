@@ -2,6 +2,7 @@ export type TmuxLocale = 'en' | 'zh'
 
 const englishTranslations = {
     'settings.title': 'Tmux',
+    'settings.forceEnglish': 'Force English UI:',
     'settings.defaultSessionName': 'Default session name:',
     'settings.sessionTitleFormat': 'Session tab title format:',
     'settings.sessionTitleFormatHelp': 'Title format variables',
@@ -67,6 +68,7 @@ const englishTranslations = {
 
 const chineseTranslations: { [K in keyof typeof englishTranslations]: string } = {
     'settings.title': 'Tmux',
+    'settings.forceEnglish': '强制使用英文界面：',
     'settings.defaultSessionName': '默认 session 名称：',
     'settings.sessionTitleFormat': 'Session tab 标题格式：',
     'settings.sessionTitleFormatHelp': '标题格式变量',
