@@ -6,6 +6,8 @@ import { Subject, Subscription } from 'rxjs'
 import { TmuxController } from '../session'
 
 import { TmuxSessionTabComponent } from '../components/tmuxSessionTab.component'
+import { TmuxSessionNamePromptService } from './tmuxSessionNamePrompt.service'
+import { buildTmuxAttachCommand } from '../tmuxSessionName'
 
 /**
  * Middleware inserted at position 0 of the original session's middleware chain
@@ -117,6 +119,7 @@ export class TmuxService {
         private zone: NgZone,
         log: LogService,
         private hotkeysService: HotkeysService,
+        private sessionNamePrompt: TmuxSessionNamePromptService,
     ) {
         this.logger = log.create('tmux-service')
         this.setupToggleHotkey()
@@ -386,8 +389,32 @@ export class TmuxService {
      * Attach to tmux from an existing terminal tab.
      * Replaces the terminal tab with a TmuxSessionTab, keeping the terminal tab
      * hidden in context. On disconnect, the terminal tab is restored.
+     *
+     * Without an explicit sessionName the user is asked for one first; both
+     * the context menu and the toggle hotkey rely on that prompt.
      */
-    async attachToTerminal(terminalTab: BaseTerminalTabComponent<any>): Promise<void> {
+    async attachToTerminal(
+        terminalTab: BaseTerminalTabComponent<any>,
+        sessionName?: string,
+    ): Promise<void> {
+        // Re-entrancy guard: if this terminal tab is already attached to a
+        // session, don't stack a second interceptor / controller / `tmux -CC`
+        // write on the same PTY (defensive — toggleTmuxMode's per-terminal lock
+        // covers the hotkey path; this covers direct callers). Checked before
+        // prompting, so the user is never asked for a name that gets ignored.
+        if (this.isTerminalAttached(terminalTab)) {
+            this.logger.warn('Terminal tab is already attached to tmux, ignoring')
+            return
+        }
+
+        // null: the user cancelled, or a prompt is already open (second
+        // trigger while the dialog is up is deliberately a no-op).
+        const name = sessionName ?? (await this.sessionNamePrompt.prompt())
+        if (!name) {
+            this.log.info('Tmux attach cancelled: no session name')
+            return
+        }
+
         // UI teardown may finish before tmux has drained its capture responses.
         // A new shell command must wait until the previous -CC DCS has ended.
         const draining = this.drainingTerminals.get(terminalTab)
@@ -410,15 +437,11 @@ export class TmuxService {
             }
         }
 
-        // Re-entrancy guard: if this terminal tab is already attached to a
-        // session, don't stack a second interceptor / controller / `tmux -CC`
-        // write on the same PTY (defensive — toggleTmuxMode's per-terminal lock
-        // covers the hotkey path; this covers direct callers).
-        for (const ctx of this.sessions) {
-            if (ctx.terminalTab === terminalTab) {
-                this.logger.warn('Terminal tab is already attached to tmux, ignoring')
-                return
-            }
+        // The prompt may have taken a while; the terminal could have been
+        // attached through another path in the meantime.
+        if (this.isTerminalAttached(terminalTab)) {
+            this.logger.warn('Terminal tab was attached while prompting, ignoring')
+            return
         }
 
         const session = terminalTab.session
@@ -496,8 +519,16 @@ export class TmuxService {
         this.setupControllerEvents(context)
 
         // Send the tmux -CC command to the terminal
-        const sessionName = this.configService.store.tmuxPlugin?.defaultSessionName ?? 'default'
-        session.write(Buffer.from(`tmux -CC new -A -s ${sessionName}\n`))
+        session.write(Buffer.from(`${buildTmuxAttachCommand(name)}\n`))
+    }
+
+    private isTerminalAttached(terminalTab: BaseTerminalTabComponent<any>): boolean {
+        for (const ctx of this.sessions) {
+            if (ctx.terminalTab === terminalTab) {
+                return true
+            }
+        }
+        return false
     }
 
     // replaceTabWithTmuxWindow removed as we open new tabs for windows instead
