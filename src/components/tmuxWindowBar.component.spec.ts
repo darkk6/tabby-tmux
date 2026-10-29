@@ -80,7 +80,7 @@ function createFakeStrip(options: {
 
 type WindowBarTestInstance = {
     activeWindowId: number | null
-    windows: Array<{ id: number; name: string }>
+    windows: Array<{ id: number; name: string; label: string }>
     controller: unknown
     tabsEl?: { nativeElement: FakeElement }
     showCloseButton: boolean
@@ -182,6 +182,56 @@ describe('TmuxWindowBarComponent layout', () => {
         it('hides the native strip scrollbar so the bar height stays fixed', () => {
             expect(styles).toMatch(/\.window-tabs::-webkit-scrollbar\s*{[^}]*display:\s*none/)
             expect(styles).toMatch(/\.window-tabs\s*{[^}]*scrollbar-width:\s*none/)
+        })
+    })
+
+    describe('window labels', () => {
+        it('prefixes the name with the tmux window index once known', async () => {
+            const { formatWindowLabel } = await import('./tmuxWindowBar.component')
+            expect(formatWindowLabel(3, 'build')).toBe('3:build')
+            expect(formatWindowLabel(0, 'shell')).toBe('0:shell')
+            expect(formatWindowLabel(undefined, 'pending')).toBe('pending')
+        })
+
+        it('renders the label in the tab and refreshes the strip on reindex', () => {
+            vi.useFakeTimers()
+            try {
+                const { component } = createComponent()
+                let index = 3
+                component.tabsEl = {
+                    nativeElement: createFakeStrip({
+                        scrollWidth: 900,
+                        clientWidth: 300,
+                        tab: { id: 9, offsetLeft: 500, offsetWidth: 72 },
+                    }),
+                }
+                component.activeWindowId = 9
+                component.controller = {
+                    events: new Subject(),
+                    getAllWindowStates: () => [
+                        { id: 9, name: 'logs', index, panes: new Set<number>() },
+                    ],
+                    getActivePaneId: () => null,
+                    getPaneTitle: () => '',
+                }
+                component.refreshWindows()
+                expect(component.windows[0].name).toBe('logs')
+                expect(component.windows[0].label).toBe('3:logs')
+                vi.runAllTimers()
+                const strip = component.tabsEl.nativeElement
+                expect(strip.scrollLeft).toBe(272)
+
+                // move-window changes the index but not the id: the signature
+                // must change so the strip follows the relabelled tab.
+                strip.scrollLeft = 0
+                index = 1
+                component.refreshWindows()
+                vi.runAllTimers()
+                expect(component.windows[0].label).toBe('1:logs')
+                expect(strip.scrollLeft).toBe(272)
+            } finally {
+                vi.useRealTimers()
+            }
         })
     })
 
