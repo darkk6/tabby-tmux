@@ -29,9 +29,19 @@ import {
 interface WindowInfo {
     id: number
     name: string
+    /**
+     * Tab label: `<index>:<name>` like the tmux status line, so the user can
+     * predict `prefix <digit>` (doc/PLAN_PREFIX_KEY.md); bare name until
+     * list-windows has reported the window's index.
+     */
+    label: string
     paneCount: number
     panes: TmuxPaneTooltipData[]
     tooltip: string
+}
+
+export function formatWindowLabel(index: number | undefined, name: string): string {
+    return index === undefined ? name : `${index}:${name}`
 }
 
 @Component({
@@ -48,7 +58,7 @@ interface WindowInfo {
                     (contextmenu)="onContextMenu($event, win)"
                     [title]="win.tooltip"
                 >
-                    <span class="window-name">{{ win.name }}</span>
+                    <span class="window-name">{{ win.label }}</span>
                     <span class="pane-badge" *ngIf="win.paneCount > 1">{{ win.paneCount }}</span>
                     <span
                         class="window-close"
@@ -480,6 +490,7 @@ export class TmuxWindowBarComponent implements OnInit, OnChanges, AfterViewInit,
             return {
                 id: ws.id,
                 name,
+                label: formatWindowLabel(ws.index, name),
                 paneCount: panes.length,
                 panes,
                 tooltip: formatTmuxWindowTooltip({ id: ws.id, name, panes }, (params) =>
@@ -490,9 +501,9 @@ export class TmuxWindowBarComponent implements OnInit, OnChanges, AfterViewInit,
         this.cdr.detectChanges()
 
         // Only follow the layout when the tab list itself changed (window
-        // added/removed/renamed): unrelated refreshes must not yank back a
-        // strip the user scrolled manually.
-        const signature = this.windows.map((win) => `${win.id}:${win.name}`).join('\n')
+        // added/removed/renamed/reindexed): unrelated refreshes must not yank
+        // back a strip the user scrolled manually.
+        const signature = this.windows.map((win) => `${win.id}:${win.label}`).join('\n')
         if (signature !== this.renderedSignature) {
             this.renderedSignature = signature
             this.scheduleReveal()
