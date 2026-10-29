@@ -19,6 +19,7 @@ import { TmuxSessionTabComponent } from './components/tmuxSessionTab.component'
 import { TmuxWindowBarComponent } from './components/tmuxWindowBar.component'
 import { TmuxSearchPanelComponent } from './components/tmuxSearchPanel.component'
 import { TmuxRenameDialogComponent } from './components/tmuxRenameDialog.component'
+import { TmuxSessionNameDialogComponent } from './components/tmuxSessionNameDialog.component'
 import { TmuxSettingsTabComponent } from './components/settings.component'
 
 @NgModule({
@@ -48,8 +49,14 @@ import { TmuxSettingsTabComponent } from './components/settings.component'
         TmuxWindowBarComponent,
         TmuxSearchPanelComponent,
         TmuxRenameDialogComponent,
+        TmuxSessionNameDialogComponent,
         TmuxSettingsTabComponent,
     ],
-    entryComponents: [TmuxPaneTabComponent, TmuxSessionTabComponent, TmuxSettingsTabComponent],
+    entryComponents: [
+        TmuxPaneTabComponent,
+        TmuxSessionTabComponent,
+        TmuxSessionNameDialogComponent,
+        TmuxSettingsTabComponent,
+    ],
 })
 export default class TmuxModule {}

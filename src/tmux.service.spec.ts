@@ -64,6 +64,12 @@ vi.mock('./components/tmuxSessionTab.component', () => ({
     TmuxSessionTabComponent: class TmuxSessionTabComponent {},
 }))
 
+// The prompt service pulls in ng-bootstrap (another partially-compiled
+// Angular package); stub it so attach paths get a name without any UI.
+vi.mock('./services/tmuxSessionNamePrompt.service', () => ({
+    TmuxSessionNamePromptService: class TmuxSessionNamePromptService {},
+}))
+
 function createLoggerMock() {
     return {
         debug: vi.fn(),
@@ -125,6 +131,9 @@ function createService() {
     const hotkeysService = {
         unfilteredHotkey$: new Subject<string>(),
     } as unknown as HotkeysService
+    // Resolves a fixed name on every call: the real "already open" guard is
+    // covered by its own spec and would null the concurrent attaches below.
+    const sessionNamePrompt = { prompt: vi.fn().mockResolvedValue('default') }
 
     const service = new TmuxService(
         {} as any, // Injector — unused by the paths under test
@@ -133,6 +142,7 @@ function createService() {
         zone as any,
         logService,
         hotkeysService,
+        sessionNamePrompt as any,
     )
     return {
         service,
@@ -144,6 +154,7 @@ function createService() {
         logger,
         hotkeysService,
         configService,
+        sessionNamePrompt,
     }
 }
 
@@ -624,5 +635,96 @@ describe('TmuxOutputInterceptor', () => {
         const interceptor = new TmuxOutputInterceptor()
         interceptor.close()
         await expect(interceptor.controlModeEnded).resolves.toBeUndefined()
+    })
+})
+
+describe('attachToTerminal session name prompt', () => {
+    function createAttachableTerminal() {
+        return Object.assign(Object.create(BaseTerminalTabComponent.prototype), {
+            topmostParent: null,
+            session: { middleware: { unshift: vi.fn(), remove: vi.fn() }, write: vi.fn() },
+            destroyed$: new Subject(),
+            frontend: {},
+        })
+    }
+
+    /** Let the attached control-mode session wind down so no timers leak. */
+    async function detachCleanly(service: TmuxService, terminal: any) {
+        const unshift = vi.mocked(terminal.session.middleware.unshift)
+        const interceptor = unshift.mock.calls[0][0] as TmuxOutputInterceptor
+        interceptor.feedFromSession(Buffer.from('\x1bP1000p'))
+        await service.disconnect()
+        interceptor.feedFromSession(Buffer.from('%exit\r\n\x1b\\'))
+        await interceptor.controlModeEnded
+    }
+
+    it('does nothing when the prompt is cancelled', async () => {
+        const { service, sessionNamePrompt } = createService()
+        sessionNamePrompt.prompt.mockResolvedValueOnce(null)
+        const terminal = createAttachableTerminal()
+
+        await service.attachToTerminal(terminal)
+
+        expect(sessionNamePrompt.prompt).toHaveBeenCalledOnce()
+        expect(terminal.session.write).not.toHaveBeenCalled()
+        expect(terminal.session.middleware.unshift).not.toHaveBeenCalled()
+    })
+
+    it('starts control mode with the prompted name, shell-quoted when needed', async () => {
+        const { service, sessionNamePrompt } = createService()
+        sessionNamePrompt.prompt.mockResolvedValueOnce('a&b')
+        const terminal = createAttachableTerminal()
+
+        await service.attachToTerminal(terminal)
+
+        expect(terminal.session.write).toHaveBeenCalledExactlyOnceWith(
+            Buffer.from("tmux -CC new -A -s 'a&b'\n"),
+        )
+        await detachCleanly(service, terminal)
+    })
+
+    it('uses an explicit name without prompting', async () => {
+        const { service, sessionNamePrompt } = createService()
+        const terminal = createAttachableTerminal()
+
+        await service.attachToTerminal(terminal, 'given')
+
+        expect(sessionNamePrompt.prompt).not.toHaveBeenCalled()
+        expect(terminal.session.write).toHaveBeenCalledExactlyOnceWith(
+            Buffer.from('tmux -CC new -A -s given\n'),
+        )
+        await detachCleanly(service, terminal)
+    })
+
+    it('does not prompt when the terminal is already attached', async () => {
+        const { service, sessionNamePrompt } = createService()
+        const context = createContext()
+        context.terminalTab.session.write = vi.fn()
+        ;(service as any).sessions.add(context)
+
+        await service.attachToTerminal(context.terminalTab)
+
+        expect(sessionNamePrompt.prompt).not.toHaveBeenCalled()
+        expect(context.terminalTab.session.write).not.toHaveBeenCalled()
+    })
+
+    it('ignores the toggle hotkey while the prompt is open', async () => {
+        const { service, appService, sessionNamePrompt } = createService()
+        let resolvePrompt: (value: string | null) => void = () => undefined
+        sessionNamePrompt.prompt.mockReturnValueOnce(
+            new Promise<string | null>((resolve) => {
+                resolvePrompt = resolve
+            }),
+        )
+        const terminal = createAttachableTerminal()
+        ;(appService as any).activeTab = terminal
+
+        const first = service.toggleTmuxMode()
+        await service.toggleTmuxMode()
+
+        expect(sessionNamePrompt.prompt).toHaveBeenCalledOnce()
+        resolvePrompt(null)
+        await first
+        expect(terminal.session.write).not.toHaveBeenCalled()
     })
 })
