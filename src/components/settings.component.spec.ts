@@ -75,6 +75,156 @@ describe('history restoration settings', () => {
     })
 })
 
+describe('tmux prefix key settings', () => {
+    type PrefixKeyEvent = {
+        key: string
+        code: string
+        ctrlKey: boolean
+        altKey: boolean
+        shiftKey: boolean
+        metaKey: boolean
+        preventDefault: ReturnType<typeof vi.fn>
+        stopPropagation: ReturnType<typeof vi.fn>
+    }
+
+    function keyEvent(key: string, modifiers: Partial<PrefixKeyEvent> = {}): PrefixKeyEvent {
+        return {
+            key,
+            code: `Key${key.toUpperCase()}`,
+            ctrlKey: false,
+            altKey: false,
+            shiftKey: false,
+            metaKey: false,
+            preventDefault: vi.fn(),
+            stopPropagation: vi.fn(),
+            ...modifiers,
+        }
+    }
+
+    function createComponent(tmuxPlugin: Record<string, unknown> = {}, hotkeys: unknown = {}) {
+        const save = vi.fn()
+        const config = {
+            store: { tmuxPlugin: { ...tmuxPlugin }, hotkeys },
+            save,
+        } as unknown as ConfigService
+        const changes = new TmuxConfigChangeService()
+        const notified = vi.fn()
+        const subscription = changes.changed$.subscribe(notified)
+        const component = new Settings(
+            config,
+            {
+                languageChange$: new Subject<string>(),
+                t: (key: string) => key,
+            } as unknown as TmuxI18nService,
+            { detectChanges: vi.fn() } as unknown as ChangeDetectorRef,
+            changes,
+            { getGroups: () => [] } as unknown as TmuxMenuService,
+        )
+        return { component, config, save, notified, subscription }
+    }
+
+    it('falls back to Ctrl-B and the bar overlay for missing or invalid config', () => {
+        const { component, subscription } = createComponent({ prefixKey: 'B' })
+        try {
+            expect(component.prefixKey).toBe('Ctrl-B')
+            expect(component.prefixOverlayStyle).toBe('bar')
+        } finally {
+            component.ngOnDestroy()
+            subscription.unsubscribe()
+        }
+    })
+
+    it('records a valid combination, saves it and notifies the plugin', () => {
+        const { component, config, save, notified, subscription } = createComponent()
+        try {
+            component.startPrefixRecording()
+            expect(component.prefixRecording).toBe(true)
+
+            // A bare modifier keeps the recorder armed.
+            const ctrl = keyEvent('Control', { code: 'ControlLeft', ctrlKey: true })
+            component.onPrefixKeydown(ctrl as unknown as KeyboardEvent)
+            expect(ctrl.preventDefault).toHaveBeenCalled()
+            expect(component.prefixRecording).toBe(true)
+
+            const stroke = keyEvent('a', { ctrlKey: true })
+            component.onPrefixKeydown(stroke as unknown as KeyboardEvent)
+            expect(stroke.preventDefault).toHaveBeenCalled()
+            expect(stroke.stopPropagation).toHaveBeenCalled()
+            expect(config.store.tmuxPlugin.prefixKey).toBe('Ctrl-A')
+            expect(component.prefixKey).toBe('Ctrl-A')
+            expect(component.prefixRecording).toBe(false)
+            expect(component.prefixError).toBe(false)
+            expect(save).toHaveBeenCalledTimes(1)
+            expect(notified).toHaveBeenCalledTimes(1)
+        } finally {
+            component.ngOnDestroy()
+            subscription.unsubscribe()
+        }
+    })
+
+    it('rejects strokes without Ctrl/Alt and keeps recording until Esc', () => {
+        const { component, config, save, subscription } = createComponent()
+        try {
+            component.startPrefixRecording()
+            component.onPrefixKeydown(keyEvent('b') as unknown as KeyboardEvent)
+            expect(component.prefixError).toBe(true)
+            expect(component.prefixRecording).toBe(true)
+            component.onPrefixKeydown(keyEvent('b', { shiftKey: true }) as unknown as KeyboardEvent)
+            expect(component.prefixError).toBe(true)
+            expect(config.store.tmuxPlugin.prefixKey).toBeUndefined()
+
+            component.onPrefixKeydown(
+                keyEvent('Escape', { code: 'Escape' }) as unknown as KeyboardEvent,
+            )
+            expect(component.prefixRecording).toBe(false)
+            expect(save).not.toHaveBeenCalled()
+
+            // Not recording: keydowns are left alone.
+            const stray = keyEvent('a', { ctrlKey: true })
+            component.onPrefixKeydown(stray as unknown as KeyboardEvent)
+            expect(stray.preventDefault).not.toHaveBeenCalled()
+            expect(config.store.tmuxPlugin.prefixKey).toBeUndefined()
+        } finally {
+            component.ngOnDestroy()
+            subscription.unsubscribe()
+        }
+    })
+
+    it('warns about Tabby hotkeys the prefix would shadow and resets to the default', () => {
+        const { component, config, save, subscription } = createComponent(
+            { prefixKey: 'Ctrl-Shift-X' },
+            { 'close-tab': ['Ctrl-Shift-W'], tmuxPlugin: { 'toggle-tmux-mode': ['Ctrl-Shift-X'] } },
+        )
+        try {
+            expect(component.prefixConflicts).toEqual(['tmuxPlugin.toggle-tmux-mode'])
+            component.resetPrefixKey()
+            expect(config.store.tmuxPlugin.prefixKey).toBe('Ctrl-B')
+            expect(component.prefixConflicts).toEqual([])
+            expect(save).toHaveBeenCalledTimes(1)
+        } finally {
+            component.ngOnDestroy()
+            subscription.unsubscribe()
+        }
+    })
+
+    it('persists the overlay style and normalizes unknown values', () => {
+        const { component, config, save, subscription } = createComponent()
+        try {
+            component.setPrefixOverlayStyle('modal')
+            expect(config.store.tmuxPlugin.prefixOverlayStyle).toBe('modal')
+            expect(component.prefixOverlayStyle).toBe('modal')
+            component.setPrefixOverlayStyle('nonsense')
+            expect(config.store.tmuxPlugin.prefixOverlayStyle).toBe('bar')
+            expect(save).toHaveBeenCalledTimes(2)
+            expect(component.prefixOverlayStyleLabel('modal')).toBe('settings.prefixOverlayModal')
+            expect(component.prefixOverlayStyleLabel('bar')).toBe('settings.prefixOverlayBar')
+        } finally {
+            component.ngOnDestroy()
+            subscription.unsubscribe()
+        }
+    })
+})
+
 describe('pane menu exclusion settings', () => {
     it('saves third-party exclusions and resets them', () => {
         const save = vi.fn()

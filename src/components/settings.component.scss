@@ -29,6 +29,42 @@
                 justify-self: start;
                 margin: 0;
             }
+            .prefix-key {
+                .prefix-key-controls {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    gap: 0.5em;
+                }
+                .prefix-key-recorder {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.6em;
+                    min-width: 11em;
+                    justify-content: center;
+                    kbd {
+                        padding: 0.1em 0.45em;
+                        border: 1px solid currentColor;
+                        border-radius: 0.25em;
+                        background: transparent;
+                        color: inherit;
+                        font-family: var(--font-family-monospace, monospace);
+                        font-size: 0.95em;
+                    }
+                    .prefix-key-change {
+                        opacity: 0.75;
+                        font-size: 0.85em;
+                    }
+                    &.is-invalid {
+                        border-color: var(--bs-danger, #dc3545);
+                    }
+                }
+                .text-danger,
+                .text-warning {
+                    display: block;
+                    margin-top: 0.35em;
+                }
+            }
         }
     }
     .menu-exclusions {
