@@ -126,8 +126,13 @@ tmux 模式下快捷键按三层设计（详见 `doc/DESIGN_KEYBINDINGS.md`）�
     - 新建 window：`Ctrl+Shift+B`
     - 切换 tmux mode：`Ctrl+Shift+X` — tmux mode 中按下退出（detach），普通终端中按下进入
 - **Tabby 顶层快捷键**（切换 tab、关闭 tab 等）保持不变
+- **tmux 前缀键**（默认 `Ctrl+B`，在插件设置页修改；仅在 tmux pane 内生效）：按下前缀后会弹出提示列出可用按键，再按 tmux 原生按键：
+    - `c` 新建 window · `n` / `p` 下一个 / 上一个 window · `0`–`9` 按 tmux index 跳转 window · `,` 重命名 window · `&` 关闭 window（先确认）
+    - `%` 向右拆分 · `"` 向下拆分 · `←↑↓→` 按方向选择 pane · `o` 下一个 pane · `z` 切换缩放 · `x` 关闭 pane（先确认）
+    - `d` detach（退出 tmux mode）· 再按一次前缀键会把前缀键本身发送到 pane
+    - `Esc` 或任意其他键取消；第二键可以继续按住 Ctrl（`Ctrl+B Ctrl+N`）
 
-所有快捷键（包括插件独有项）统一在 **Tabby Settings → Hotkeys** 中配置；插件设置页不提供快捷键表单，避免与 Tabby 形成双入口。
+所有 Tabby 热键（包括插件独有的 `tmuxPlugin.*`）统一在 **Tabby Settings → Hotkeys** 中配置。前缀键是唯一例外：它不是 Tabby 热键（全局热键会吞掉所有终端里的 `Ctrl+B`），因此放在插件设置页；第二键固定为 tmux 原生键位，不可修改。
 
 ## 兼容性
 

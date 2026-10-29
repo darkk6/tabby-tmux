@@ -80,6 +80,18 @@ xterm 前端(`xtermFrontend.ts`)在 keydown 时对命中热键 `preventDefault` 
 
 插件设置页保持现状,只保留 tmux 集成独有的**非快捷键**配置:`defaultSessionName` / `commandTimeoutMs` / `sendKeysChunkSize` / `resizeDebounceMs` / `debugLogging` / `showWindowCloseButton`。
 
+## 第四层：tmux prefix key（插件层拦截）
+
+> 完整决策记录见 `PLAN_PREFIX_KEY.md`。本节只记录与三层模型的关系。
+
+`prefix + 单键`（默认 `Ctrl-B`，可在插件设置页修改）是对三层模型的**补充**，不替换任何现有键位：
+
+- **不走 `HotkeyProvider`**。Tabby 热键全局生效且 xterm 前端对 partial-match 一律 `preventDefault`，注册为热键会吞掉普通终端里的 Ctrl-B（readline / vim / 嵌套 tmux）。也不用 Tabby 的多键序列：`HotkeysService.lastKeystrokes` 永不过期且允许中间夹杂其他键，无法做到"按错键即取消"。
+- **拦截点**：`TmuxSessionTabComponent` 在自身 host 元素上注册 capture-phase `keydown`（`installPrefixKeyListener`），先于 xterm 的 `attachCustomKeyEventHandler`（挂在 textarea 上）和 Tabby `HotkeysService`（document 的 bubble-phase 监听）执行；仅处理 `event.target` 落在 `.pane-area` 内的按键，window bar / 搜索面板 / 对话框是其兄弟节点，天然不受影响。命中后 `preventDefault + stopPropagation + stopImmediatePropagation`，按键不会泄漏到 tmux 或 Tabby。
+- **第二键写死为 tmux 原生键**，由 `src/tmuxPrefix.ts`（纯函数）解析后直接调用插件动作方法（`switchWindowByOffset` / `onCreateWindow` / `navigate` / `handlePaneMaximizeHotkey` …）。改 Tabby Hotkeys 里的 `tmuxPlugin.*` 键位不影响 prefix 表。
+- **设置入口例外**：prefix 不是 Tabby 热键，不会出现在 Tabby Settings → Hotkeys，因此插件设置页是唯一入口，不构成"设置表单决策"一节反对的双入口。配置键 `tmuxPlugin.prefixKey` 故意**不**放在 `hotkeys` 树下（`config.spec.ts` 有断言）。
+- **window 数字键语义不同**：`prefix <digit>` 跳到 `#{window_index}` 为该数字的 window（tmux 语义），而 `tmuxPlugin.window-N` 仍是 window bar 第 N 个（位置语义）。window bar 标签显示为 `<index>:<name>`。
+
 ## 全局吞键副作用声明
 
 Tabby 热键是全局的:新注册的 `tmuxPlugin.*` 组合键在**普通终端**(非 tmux 模式)按下时,xterm 前端 partial-match 命中同样会 `preventDefault`。所选默认键(`Ctrl-Shift-[` 等)在 shell 中本无有效输入含义,副作用可忽略;若用户自定义到有含义的键位,属用户自己的配置选择。

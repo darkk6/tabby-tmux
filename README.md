@@ -126,8 +126,13 @@ In tmux mode, shortcuts are layered (see `doc/DESIGN_KEYBINDINGS.md`):
     - New window: `Ctrl+Shift+B`
     - Toggle tmux mode: `Ctrl+Shift+X` — exits tmux mode when connected; enters it from the active terminal tab when idle
 - **Tabby top-level shortcuts** (switch/close tabs, etc.) are unchanged
+- **tmux prefix key** (default `Ctrl+B`, change it in the plugin settings page; active only inside tmux panes): press the prefix, an overlay lists the next keys, then press a tmux key:
+    - `c` new window · `n` / `p` next / previous window · `0`–`9` window by tmux index · `,` rename window · `&` close window (asks first)
+    - `%` split right · `"` split down · `←↑↓→` select pane · `o` next pane · `z` toggle zoom · `x` close pane (asks first)
+    - `d` detach (exit tmux mode) · prefix again sends the prefix key itself to the pane
+    - `Esc` or any other key cancels; Ctrl may stay held for the second key (`Ctrl+B Ctrl+N`)
 
-All shortcuts — including the plugin-specific ones — are configured in **Tabby Settings → Hotkeys**; the plugin settings page intentionally has no shortcut form, to avoid a second conflicting entry point.
+All Tabby hotkeys — including the plugin-specific `tmuxPlugin.*` ones — are configured in **Tabby Settings → Hotkeys**. The prefix key is the one exception: it is not a Tabby hotkey (a global one would swallow `Ctrl+B` in every terminal), so it lives in the plugin settings page instead; the second key is fixed to tmux's own bindings.
 
 ## Compatibility
 
