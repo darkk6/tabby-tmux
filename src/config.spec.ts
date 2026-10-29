@@ -35,6 +35,7 @@ describe('TmuxConfigProvider', () => {
     it('provides the expected tmuxPlugin defaults', () => {
         const provider = new TmuxConfigProvider()
         expect(provider.defaults.tmuxPlugin).toEqual({
+            forceEnglish: false,
             defaultSessionName: 'default',
             sessionTitleFormat: '#{window_name} - #{host}',
             historyRestoreLimit: 5000,

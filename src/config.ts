@@ -6,6 +6,7 @@ import type { MenuProviderLabel } from './tmuxMenu'
 export class TmuxConfigProvider extends ConfigProvider {
     defaults = {
         tmuxPlugin: {
+            forceEnglish: false,
             defaultSessionName: 'default',
             sessionTitleFormat: '#{window_name} - #{host}',
             historyRestoreLimit: DEFAULT_HISTORY_RESTORE_LIMIT,

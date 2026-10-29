@@ -17,6 +17,16 @@ import { getExcludedMenuProviders } from '../tmuxMenu'
             <div class="tmux-table">
                 <div class="setting-row">
                     <div class="header">
+                        <div class="title">{{ i18n.t('settings.forceEnglish') }}</div>
+                    </div>
+                    <input
+                        type="checkbox"
+                        [(ngModel)]="config.store.tmuxPlugin.forceEnglish"
+                        (ngModelChange)="saveConfig()"
+                    />
+                </div>
+                <div class="setting-row">
+                    <div class="header">
                         <div class="title">{{ i18n.t('settings.defaultSessionName') }}</div>
                     </div>
                     <input
