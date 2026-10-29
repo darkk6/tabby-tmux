@@ -19,6 +19,8 @@ import { TmuxSessionTabComponent } from './components/tmuxSessionTab.component'
 import { TmuxWindowBarComponent } from './components/tmuxWindowBar.component'
 import { TmuxSearchPanelComponent } from './components/tmuxSearchPanel.component'
 import { TmuxRenameDialogComponent } from './components/tmuxRenameDialog.component'
+import { TmuxConfirmDialogComponent } from './components/tmuxConfirmDialog.component'
+import { TmuxPrefixOverlayComponent } from './components/tmuxPrefixOverlay.component'
 import { TmuxSessionNameDialogComponent } from './components/tmuxSessionNameDialog.component'
 import { TmuxSettingsTabComponent } from './components/settings.component'
 
@@ -49,6 +51,8 @@ import { TmuxSettingsTabComponent } from './components/settings.component'
         TmuxWindowBarComponent,
         TmuxSearchPanelComponent,
         TmuxRenameDialogComponent,
+        TmuxConfirmDialogComponent,
+        TmuxPrefixOverlayComponent,
         TmuxSessionNameDialogComponent,
         TmuxSettingsTabComponent,
     ],

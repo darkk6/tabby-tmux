@@ -46,7 +46,16 @@ describe('TmuxConfigProvider', () => {
             showWindowCloseButton: true,
             excludedMenuProviders: [],
             menuProviderLabels: [],
+            prefixKey: 'Ctrl-B',
+            prefixOverlayStyle: 'bar',
         })
+    })
+
+    it('keeps the prefix key out of the Tabby hotkeys tree', () => {
+        // The prefix must never become a global Tabby hotkey (it would swallow
+        // Ctrl-B in every non-tmux terminal) — see doc/PLAN_PREFIX_KEY.md.
+        const provider = new TmuxConfigProvider()
+        expect(JSON.stringify(provider.defaults.hotkeys)).not.toContain('prefix')
     })
 
     it('provides nested tmuxPlugin hotkey defaults for window actions', () => {

@@ -8,7 +8,7 @@ import {
     ElementRef,
     NgZone,
 } from '@angular/core'
-import { Subscription } from 'rxjs'
+import { Observable, Subscription } from 'rxjs'
 import {
     SplitTabComponent,
     SplitContainer,
@@ -34,6 +34,17 @@ import { ResizeDirection, SplitDirection } from '../tmuxKeymap'
 import { normalizeRename } from '../tmuxRename'
 import { formatTmuxTitle } from '../tmuxTitle'
 import { TmuxConfigChangeService } from '../services/tmuxConfigChange.service'
+import {
+    PrefixAction,
+    PrefixOverlayStyle,
+    encodePrefixKey,
+    isModifierKey,
+    keystrokeFromEvent,
+    keystrokesEqual,
+    normalizePrefixKey,
+    normalizePrefixOverlayStyle,
+    resolvePrefixAction,
+} from '../tmuxPrefix'
 
 export interface TmuxSessionProfile {
     sessionName?: string
@@ -44,6 +55,11 @@ interface RenameRequest {
     id: number
     currentValue: string
     title: string
+}
+
+interface ConfirmRequest {
+    message: string
+    onConfirm: () => void
 }
 
 /**
@@ -68,7 +84,21 @@ interface RenameRequest {
     template: `
         <div class="pane-area" #paneAreaEl [style.background]="paneAreaBackground">
             <ng-container #vc></ng-container>
+            <tmux-prefix-overlay
+                *ngIf="prefixPending"
+                [prefixKey]="prefixKey"
+                [variant]="prefixOverlayStyle"
+                (dismiss)="cancelPrefix()"
+            ></tmux-prefix-overlay>
         </div>
+        <tmux-confirm-dialog
+            *ngIf="confirmRequest"
+            [message]="confirmRequest.message"
+            [cancelLabel]="i18n.t('common.cancel')"
+            [confirmLabel]="i18n.t('common.confirm')"
+            (confirm)="resolveConfirm(true)"
+            (cancel)="resolveConfirm(false)"
+        ></tmux-confirm-dialog>
         <tmux-search-panel
             *ngIf="searchPanelOpen"
             [frontend]="searchPanelFrontend!"
@@ -211,6 +241,16 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
     searchPanelFrontend: Frontend | null = null
     /** Session-level rename dialog state shared by window and pane menus. */
     renameRequest: RenameRequest | null = null
+    /** Pending yes/no prompt for destructive prefix actions (kill-pane/window). */
+    confirmRequest: ConfirmRequest | null = null
+    /**
+     * True between the tmux prefix keystroke and the next key: the overlay
+     * is shown and the next keydown inside the pane area is consumed.
+     * See handlePrefixKeydown / doc/PLAN_PREFIX_KEY.md.
+     */
+    prefixPending = false
+    private prefixKeydownListener: ((event: KeyboardEvent) => void) | null = null
+    private prefixMousedownListener: ((event: MouseEvent) => void) | null = null
     sessionName = ''
     private _initialized = false
     private _tabsService: TabsService
@@ -351,6 +391,8 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
             this.logger.error('No controller provided')
             return
         }
+
+        this.installPrefixKeyListener()
 
         this.sessionName = this.controller.getSessionName() || this.profile.sessionName || 'default'
         this.updateSessionTitle()
@@ -1973,6 +2015,220 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
         this._dividerElements = []
     }
 
+    // ── tmux prefix key (doc/PLAN_PREFIX_KEY.md) ──
+    //
+    // The prefix is NOT a Tabby hotkey: Tabby hotkeys are global and the
+    // xterm frontend swallows any configured keystroke in every terminal,
+    // which would eat Ctrl-B (readline / vim / nested tmux) outside tmux
+    // mode. Instead a capture-phase keydown listener on this tab's host
+    // element sees the key before xterm's own handler (on the textarea) and
+    // before Tabby's HotkeysService (a bubble-phase document listener), and
+    // only acts on keys targeted inside the pane area — the window bar, the
+    // search panel and the dialogs are siblings and stay untouched.
+
+    /** Configured prefix keystroke (Tabby syntax), falling back to Ctrl-B. */
+    get prefixKey(): string {
+        return normalizePrefixKey(this.configService?.store?.tmuxPlugin?.prefixKey)
+    }
+
+    get prefixOverlayStyle(): PrefixOverlayStyle {
+        return normalizePrefixOverlayStyle(
+            this.configService?.store?.tmuxPlugin?.prefixOverlayStyle,
+        )
+    }
+
+    private installPrefixKeyListener(): void {
+        const host = this.hostElement?.nativeElement as HTMLElement | undefined
+        if (!host?.addEventListener || this.prefixKeydownListener) {
+            return
+        }
+        this.prefixKeydownListener = (event: KeyboardEvent) => this.handlePrefixKeydown(event)
+        host.addEventListener('keydown', this.prefixKeydownListener, true)
+        // Switching Tabby tabs while the overlay is open: drop the pending
+        // prefix so it cannot fire on the next key typed after coming back.
+        const blurred$ = (this as any).blurred$ as Observable<void> | undefined
+        if (typeof blurred$?.subscribe === 'function') {
+            this.subscribeUntilDestroyed(blurred$, () => this.cancelPrefix())
+        }
+    }
+
+    /** True when the keyboard event targets a pane (not the bar / dialogs). */
+    private isPaneAreaEvent(event: Event): boolean {
+        const host = this.hostElement?.nativeElement as HTMLElement | undefined
+        const paneArea = host?.querySelector?.('.pane-area')
+        const target = event.target as Node | null
+        return !!paneArea && !!target && paneArea.contains(target)
+    }
+
+    handlePrefixKeydown(event: KeyboardEvent): void {
+        if (!this.controller || !this.isPaneAreaEvent(event)) {
+            return
+        }
+        // IME composition: never treat composed input as keys.
+        if (event.isComposing || event.keyCode === 229) {
+            return
+        }
+        if (!this.prefixPending) {
+            if (event.repeat || !keystrokesEqual(keystrokeFromEvent(event), this.prefixKey)) {
+                return
+            }
+            this.swallowKey(event)
+            this.startPrefix()
+            return
+        }
+        // Waiting for the second key. A bare modifier keydown (Ctrl held for
+        // `C-b C-n`) is neither a key nor a cancel; everything else ends the
+        // pending state and is consumed — tmux swallows unknown keys too.
+        if (isModifierKey(event.key)) {
+            return
+        }
+        this.swallowKey(event)
+        if (event.repeat) {
+            return
+        }
+        const action = event.key === 'Escape' ? null : resolvePrefixAction(event, this.prefixKey)
+        this.cancelPrefix()
+        if (action) {
+            this.runPrefixAction(action)
+        }
+    }
+
+    private swallowKey(event: KeyboardEvent): void {
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+    }
+
+    private startPrefix(): void {
+        this.prefixPending = true
+        // Any mouse interaction anywhere (clicking another pane, the window
+        // bar, another Tabby tab) cancels the prefix, like losing focus.
+        if (typeof document !== 'undefined' && !this.prefixMousedownListener) {
+            this.prefixMousedownListener = () => this.cancelPrefix()
+            document.addEventListener('mousedown', this.prefixMousedownListener, true)
+        }
+        this.cdr.detectChanges()
+    }
+
+    cancelPrefix(): void {
+        if (this.prefixMousedownListener && typeof document !== 'undefined') {
+            document.removeEventListener('mousedown', this.prefixMousedownListener, true)
+            this.prefixMousedownListener = null
+        }
+        if (!this.prefixPending) {
+            return
+        }
+        this.prefixPending = false
+        this.cdr.detectChanges()
+    }
+
+    /**
+     * Dispatch the key pressed after the prefix straight to the plugin's
+     * action methods — the same code paths the Tabby hotkeys and the menus
+     * use, so rebinding those never affects the prefix table.
+     */
+    runPrefixAction(action: PrefixAction): void {
+        const controller = this.controller
+        if (!controller) return
+        const pane = this.getFocusedTab() as TmuxPaneTabComponent | null
+        const paneId = pane instanceof TmuxPaneTabComponent ? pane.paneId : null
+        switch (action.type) {
+            case 'new-window':
+                void this.onCreateWindow()
+                break
+            case 'next-window':
+                this.switchWindowByOffset(1)
+                break
+            case 'previous-window':
+                this.switchWindowByOffset(-1)
+                break
+            case 'select-window': {
+                // tmux semantics: the window whose #{window_index} is the
+                // digit — not the Nth tab (that is tmuxPlugin.window-N).
+                const target = controller
+                    .getAllWindowStates()
+                    .find((ws) => ws.index === action.index)
+                if (target) {
+                    this.enqueueSwitchToWindow(target.id, true)
+                }
+                break
+            }
+            case 'rename-window': {
+                const windowId = this.activeWindowId
+                if (windowId === null) break
+                const state = controller.getWindowState(windowId)
+                this.requestWindowRename({ id: windowId, name: state?.name ?? '' })
+                break
+            }
+            case 'kill-window': {
+                const windowId = this.activeWindowId
+                if (windowId === null) break
+                const state = controller.getWindowState(windowId)
+                const name = state?.name || this.i18n.t('window.defaultName', { id: windowId })
+                this.requestConfirm(this.i18n.t('confirm.killWindow', { name }), () => {
+                    void this.onWindowClose(windowId)
+                })
+                break
+            }
+            case 'split':
+                if (paneId !== null) {
+                    controller.splitWindow(paneId, action.dir).catch(() => {
+                        /* tmux may reject during detach */
+                    })
+                }
+                break
+            case 'navigate':
+                this.navigate(action.dir)
+                break
+            case 'next-pane':
+                this.navigateLinear(1)
+                break
+            case 'zoom':
+                this.handlePaneMaximizeHotkey()
+                break
+            case 'kill-pane':
+                if (paneId !== null) {
+                    this.requestConfirm(this.i18n.t('confirm.killPane', { id: paneId }), () => {
+                        controller.killPane(paneId).catch(() => {
+                            /* tmux may reject during detach */
+                        })
+                    })
+                }
+                break
+            case 'detach':
+                this.onDisconnect()
+                break
+            case 'send-prefix': {
+                // tmux send-prefix: the raw prefix key goes to the pane. Routed
+                // through the pane tab so synchronize-panes broadcast applies.
+                const bytes = encodePrefixKey(this.prefixKey)
+                if (pane && bytes) {
+                    pane.sendInput(bytes)
+                }
+                break
+            }
+        }
+    }
+
+    private requestConfirm(message: string, onConfirm: () => void): void {
+        this.confirmRequest = { message, onConfirm }
+        this.cdr.detectChanges()
+    }
+
+    resolveConfirm(accepted: boolean): void {
+        const request = this.confirmRequest
+        if (!request) return
+        this.confirmRequest = null
+        this.cdr.detectChanges()
+        // Return keyboard focus to the active pane, like closeRenameDialog.
+        setTimeout(() => {
+            ;(this.getFocusedTab() as TmuxPaneTabComponent | null)?.frontend?.focus()
+        }, 0)
+        if (accepted) {
+            request.onConfirm()
+        }
+    }
+
     // --- UI Event Handlers ---
 
     onDisconnect(): void {
@@ -1998,6 +2254,12 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
     }
 
     override ngOnDestroy(): void {
+        this.cancelPrefix()
+        if (this.prefixKeydownListener) {
+            const host = this.hostElement?.nativeElement as HTMLElement | undefined
+            host?.removeEventListener?.('keydown', this.prefixKeydownListener, true)
+            this.prefixKeydownListener = null
+        }
         if (this.eventSubscription) {
             this.eventSubscription.unsubscribe()
         }

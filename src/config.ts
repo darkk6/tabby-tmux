@@ -1,6 +1,11 @@
 import { ConfigProvider } from 'tabby-core'
 import { DEFAULT_HISTORY_RESTORE_LIMIT } from './historyRestore'
 import type { MenuProviderLabel } from './tmuxMenu'
+import {
+    DEFAULT_PREFIX_KEY,
+    DEFAULT_PREFIX_OVERLAY_STYLE,
+    type PrefixOverlayStyle,
+} from './tmuxPrefix'
 
 // eslint-disable-next-line new-cap
 export class TmuxConfigProvider extends ConfigProvider {
@@ -17,6 +22,12 @@ export class TmuxConfigProvider extends ConfigProvider {
             showWindowCloseButton: true,
             excludedMenuProviders: [] as string[],
             menuProviderLabels: [] as MenuProviderLabel[],
+            // tmux-style prefix key (doc/PLAN_PREFIX_KEY.md). Deliberately NOT
+            // under `hotkeys`: it is intercepted inside tmux panes only and
+            // must never become a global Tabby hotkey. Tabby keystroke syntax.
+            prefixKey: DEFAULT_PREFIX_KEY,
+            // Overlay shown after the prefix: bottom bar or centered modal.
+            prefixOverlayStyle: DEFAULT_PREFIX_OVERLAY_STYLE as PrefixOverlayStyle,
         },
         // Window-level hotkeys unique to tmux mode (see
         // doc/DESIGN_KEYBINDINGS.md). Tabby's getHotkeysConfigRecursive
