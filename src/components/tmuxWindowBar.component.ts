@@ -109,13 +109,17 @@ export function formatWindowLabel(index: number | undefined, name: string): stri
                 display: flex;
                 flex-wrap: nowrap;
                 align-items: center;
+                /* Absolute size so the bar does not inherit whatever the host
+                   element uses; every inner dimension below is in em, so this
+                   one number scales the whole bar. */
+                font-size: 14px;
                 /* the tab strip keeps its own 2px rhythm with the + button */
                 gap: 2px;
-                padding: 2px 8px;
+                padding: 3px 8px;
                 background: var(--bar-bg, var(--theme-bg-more-2, rgba(30, 30, 30, 0.95)));
                 border-top: 1px solid
                     var(--bar-border, var(--theme-bg-less-2, rgba(255, 255, 255, 0.1)));
-                min-height: 28px;
+                min-height: 2.5em;
                 /* children scroll internally; nothing may spill out of the bar */
                 overflow: hidden;
             }
@@ -131,7 +135,7 @@ export function formatWindowLabel(index: number | undefined, name: string): stri
                 position: relative;
                 overflow-x: auto;
                 overflow-y: hidden;
-                /* A native scrollbar would eat into the 28px bar height and
+                /* A native scrollbar would eat into the bar height and
                shift the pane area; wheel scrolling plus the edge fades
                below replace it. */
                 scrollbar-width: none;
@@ -168,21 +172,21 @@ export function formatWindowLabel(index: number | undefined, name: string): stri
             .window-tab {
                 display: flex;
                 align-items: center;
-                gap: 4px;
-                height: 22px;
+                gap: 0.35em;
+                height: 2em;
                 /* Never shrink or wrap: the strip scrolls instead, so a tab
                always keeps its name and its close button apart. */
                 flex: 0 0 auto;
                 /* 窗口名过短（如 "1"、"2"）时 tab 会缩得很窄，
                导致关闭按钮紧贴名称，悬停时极易误触关闭。
                设置最小宽度保证名称与关闭按钮之间有足够间距。 */
-                min-width: 72px;
-                padding: 0 8px;
+                min-width: 5.5em;
+                padding: 0 0.7em;
                 border: 1px solid transparent;
-                border-radius: 3px;
+                border-radius: 4px;
                 background: transparent;
                 color: var(--bar-fg-dim, var(--theme-fg-more-2, #999));
-                font-size: 0.82em;
+                font-size: 1em;
                 cursor: pointer;
                 white-space: nowrap;
                 transition:
@@ -206,10 +210,10 @@ export function formatWindowLabel(index: number | undefined, name: string): stri
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                min-width: 16px;
-                height: 16px;
-                padding: 0 3px;
-                border-radius: 8px;
+                min-width: 1.4em;
+                height: 1.4em;
+                padding: 0 0.3em;
+                border-radius: 0.7em;
                 background: var(--bar-hover-bg, var(--theme-bg-less-2, rgba(255, 255, 255, 0.1)));
                 font-size: 0.85em;
                 color: var(--bar-fg-more, var(--theme-fg-more, #aaa));
@@ -219,11 +223,11 @@ export function formatWindowLabel(index: number | undefined, name: string): stri
                 align-items: center;
                 justify-content: center;
                 margin-left: auto;
-                margin-right: -4px;
-                width: 14px;
-                height: 14px;
+                margin-right: -0.3em;
+                width: 1.5em;
+                height: 1.5em;
                 border-radius: 2px;
-                font-size: 0.7em;
+                font-size: 0.75em;
                 color: transparent;
                 cursor: pointer;
                 visibility: hidden;
@@ -255,13 +259,13 @@ export function formatWindowLabel(index: number | undefined, name: string): stri
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                width: 24px;
-                height: 24px;
+                width: 2.2em;
+                height: 2.2em;
                 border: none;
-                border-radius: 3px;
+                border-radius: 4px;
                 background: transparent;
                 color: var(--bar-fg-dim, var(--theme-fg-more-2, #888));
-                font-size: 0.8em;
+                font-size: 0.9em;
                 cursor: pointer;
             }
             .bar-btn:hover {
