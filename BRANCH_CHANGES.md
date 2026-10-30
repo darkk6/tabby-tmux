@@ -8,13 +8,14 @@
 
 ## 功能一覽
 
-| 功能 | 設定鍵 | 預設值 | 相關 commit |
-|---|---|---|---|
-| Force English UI | `tmuxPlugin.forceEnglish` | `false` | `dd3fe43` |
-| 進入 tmux mode 前詢問 session 名稱 | 無（沿用 `tmuxPlugin.defaultSessionName`） | - | `d071dce`, `adb5d87` |
+| 功能                               | 設定鍵                                                   | 預設值                | 相關 commit          |
+| ---------------------------------- | -------------------------------------------------------- | --------------------- | -------------------- |
+| Force English UI                   | `tmuxPlugin.forceEnglish`                                | `false`               | `dd3fe43`            |
+| 進入 tmux mode 前詢問 session 名稱 | 無（沿用 `tmuxPlugin.defaultSessionName`）               | -                     | `d071dce`, `adb5d87` |
 | tmux prefix key 與按鍵提示 overlay | `tmuxPlugin.prefixKey` / `tmuxPlugin.prefixOverlayStyle` | `Ctrl-B` / bottom bar | `b1ff9b3`, `a4cc4c1` |
-| 視窗分頁顯示 tmux window index | 無 | - | `a7fbdd5` |
-| 加大視窗分頁列 | 無 | - | `8337ad0` |
+| 視窗分頁顯示 tmux window index     | 無                                                       | -                     | `a7fbdd5`            |
+| 加大視窗分頁列                     | 無                                                       | -                     | `8337ad0`            |
+| Home/End 在 tmux pane 內無效       | 無                                                       | -                     | `bdd0e5c`            |
 
 ## 1. Force English UI（`dd3fe43`）
 
@@ -49,19 +50,19 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 
 ### 第二鍵對應（固定為 tmux 自己的綁定，與 `tmuxPlugin.*` hotkey 設定無關）
 
-| 鍵 | 動作 |
-|---|---|
-| `c` | 新視窗 |
-| `n` / `p` | 下一個 / 上一個視窗 |
-| `0`–`9` | 依 tmux window index 切換視窗 |
-| `,` | 重新命名視窗 |
-| `&` | 關閉視窗（會先確認） |
-| `%` / `"` | 向右 / 向下分割 |
-| `←↑↓→` | 選擇 pane |
-| `o` | 下一個 pane |
-| `z` | 切換 zoom |
-| `x` | 關閉 pane（會先確認） |
-| `d` | detach（離開 tmux mode） |
+| 鍵              | 動作                                          |
+| --------------- | --------------------------------------------- |
+| `c`             | 新視窗                                        |
+| `n` / `p`       | 下一個 / 上一個視窗                           |
+| `0`–`9`         | 依 tmux window index 切換視窗                 |
+| `,`             | 重新命名視窗                                  |
+| `&`             | 關閉視窗（會先確認）                          |
+| `%` / `"`       | 向右 / 向下分割                               |
+| `←↑↓→`          | 選擇 pane                                     |
+| `o`             | 下一個 pane                                   |
+| `z`             | 切換 zoom                                     |
+| `x`             | 關閉 pane（會先確認）                         |
+| `d`             | detach（離開 tmux mode）                      |
 | prefix 再按一次 | 把 prefix 本身送進 pane（走 pane input 路徑） |
 
 - `Esc`、任何不支援的鍵、滑鼠點擊或失去 tab 焦點都會取消。
@@ -87,12 +88,26 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 
 分頁列設定絕對 14px 字級，內部所有尺寸改用 em 表示，分頁（現為 28px 高）、badge 與按鈕隨這一個數字一起縮放。
 
+## 6. Home/End 在 tmux pane 內無效（`bdd0e5c`）
+
+修正 plugin pane 內 `Home` / `End` 完全沒反應的問題（`cat -v` 什麼都不顯示），典型症狀是 zsh 的 autosuggestion 無法用 `End` 採用。兩個原因疊在一起：
+
+- 按鍵根本沒送出：Tabby 把裸的 `Home` / `End` 綁成 `home` / `end` hotkey，HotkeysService 在 keydown 就命中並取消事件，xterm 不會自己編碼；
+  真正送 `ESC O H` / `ESC O F` 的 handler 寫在 local / ssh / serial 各自的 tab class 裡，而 `TmuxPaneTabComponent` 繼承的 `BaseTerminalTabComponent` 沒有這段。
+  修法：`TmuxSessionTabComponent` 在有焦點時處理 `home` / `end`，把同樣的序列 `sendInput` 給 active pane（pane 的 `sendInput` 會一併處理同步輸入）。
+- 送出後 zsh 也認不得：TUI tmux 會把外層終端的按鍵序列解碼成按鍵，再依 pane 的 TERM 重新編碼（`tmux-256color` 下 End 是 `ESC [ 4 ~`，即 `$terminfo[kend]`）；
+  Control mode 的 `sendKeys` 卻用 `send-keys -H` 把原始 bytes 直接塞進 pane，zsh 沒有對應的 bindkey。
+  修法：`sendKeys` 遇到「整段輸入恰好是一個 Home/End 序列」（CSI、SS3、`~` 三種形式，含 xterm 修飾鍵參數）時改以鍵名送出
+  （`send-keys -t %N End`、`C-End` …），由 tmux 依 pane 的 TERM 與 cursor-key mode 編碼，行為與真實 client 一致。
+- 其他輸入（連續按鍵、貼上文字、滑鼠回報、xterm 與 tmux 編碼本來就相同的方向鍵等）維持原本的 `-H` 路徑。
+- 新增檔案：`src/tmuxInputKeys.ts`（含 spec）；修改 `src/gateway.ts`、`src/components/tmuxSessionTab.component.ts`、`doc/DESIGN_KEYBINDINGS.md`。
+
 ## 驗證狀態
 
-- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（451 passed）皆通過。
+- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（498 passed）皆通過。
 - `pnpm run format:check` 在此 CRLF checkout 上會整庫失敗，與本分支無關；被改到的檔案以 `prettier --check --end-of-line auto` 檢查通過。
 - 鍵盤互動在 Tabby 1.0.238 內手動驗證；`doc/PLAN_PREFIX_KEY.md` 的手動 checklist 未在建置機上全數跑過。
 
 ## 改動統計
 
-相對 `master`：31 個檔案，+2955 / -51 行。
+相對 `master`：36 個檔案，+3331 / -51 行。
