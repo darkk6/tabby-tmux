@@ -203,6 +203,33 @@ describe('TmuxGateway sendKeys', () => {
         expect(written).toEqual(['send-keys -t %5 -H 61 62\r'])
     })
 
+    it.each<[string, string]>([
+        ['\x1b[F', 'End'],
+        ['\x1bOF', 'End'],
+        ['\x1b[H', 'Home'],
+        ['\x1bOH', 'Home'],
+        ['\x1b[1;5F', 'C-End'],
+    ])('sends a lone %j as the tmux key name %s', (input, keyName) => {
+        const { gateway, written } = createGateway()
+        gateway.sendKeys(Buffer.from(input, 'latin1'), 5)
+        expect(written).toEqual([`send-keys -t %5 ${keyName}\r`])
+    })
+
+    it('keeps a key sequence embedded in longer input as hex', () => {
+        const { gateway, written } = createGateway()
+        gateway.sendKeys(Buffer.from('a\x1b[F', 'latin1'), 5)
+        expect(written).toEqual(['send-keys -t %5 -H 61 1b 5b 46\r'])
+    })
+
+    it('tracks a named-key write in the response queue', async () => {
+        const { gateway } = createGateway()
+        gateway.sendKeys(Buffer.from('\x1b[F', 'latin1'), 1)
+        gateway.executeData(Buffer.from('%begin 1 3 1\n%end 3\n'))
+        const p = gateway.sendCommand('list-windows')
+        gateway.executeData(Buffer.from('%begin 1 4 1\nwin\n%end 4\n'))
+        await expect(p).resolves.toBe('win')
+    })
+
     it('chunks long input by sendKeysChunkSize', () => {
         const { gateway, written } = createGateway({ chunkSize: 4 })
         gateway.sendKeys(Buffer.from([0x61, 0x62, 0x63]), 5)

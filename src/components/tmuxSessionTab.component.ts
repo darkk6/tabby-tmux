@@ -46,6 +46,16 @@ import {
     resolvePrefixAction,
 } from '../tmuxPrefix'
 
+/**
+ * Sequences the connection tab classes (tabby-local / tabby-ssh /
+ * tabby-serial) send for Tabby's line-editing hotkeys. Kept identical so a
+ * tmux pane behaves like a plain terminal tab.
+ */
+const LINE_EDIT_HOTKEY_SEQUENCES: Readonly<Record<string, string>> = {
+    home: '\x1bOH',
+    end: '\x1bOF',
+}
+
 export interface TmuxSessionProfile {
     sessionName?: string
 }
@@ -323,8 +333,35 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
         this.subscribeUntilDestroyed(this.hotkeysService.hotkey$, (hotkey) => {
             if (hotkey === 'pane-maximize') {
                 this.handlePaneMaximizeHotkey()
+                return
             }
+            this.handleLineEditHotkey(hotkey)
         })
+    }
+
+    /**
+     * Tabby's `home` / `end` hotkeys (bound to the bare Home / End keys by
+     * default) are matched by HotkeysService on keydown, which cancels the
+     * DOM event so xterm never encodes the key itself. The sequence the
+     * shell receives is written by the hotkey handler instead — and that
+     * handler lives in the connection tab classes (TerminalTabComponent,
+     * SSHTabComponent, SerialTabComponent), not in BaseTerminalTabComponent,
+     * which TmuxPaneTabComponent extends. In a tmux pane the key was thus
+     * swallowed and nothing reached the shell.
+     *
+     * Mirror the connection tabs here, routed to the active pane. The pane's
+     * sendInput also handles synchronized input, and the gateway turns the
+     * sequence into a named tmux key (see tmuxInputKeys.ts).
+     */
+    private handleLineEditHotkey(hotkey: string): void {
+        if (!this.hasFocus) {
+            return
+        }
+        const sequence = LINE_EDIT_HOTKEY_SEQUENCES[hotkey]
+        if (!sequence) {
+            return
+        }
+        ;(this.getFocusedTab() as TmuxPaneTabComponent | null)?.sendInput(sequence)
     }
 
     private getSessionFallbackTitle(): string {

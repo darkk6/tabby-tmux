@@ -46,6 +46,7 @@ tmux 集成把两个心智模型叠在一起:Tabby 的 tab/pane 模型与 tmux �
 | `pane-nav-previous/next` | `Ctrl-Alt-[` / `Ctrl-Alt-]` | `select-pane -t <按布局顺序相邻 pane>` |
 | `pane-maximize` | `Ctrl-Alt-Enter`(macOS `⌘-⌥-Enter`) | 热键由 SessionTab **完全接管**(`handlePaneMaximizeHotkey`),直接 `resize-pane -Z -t %id`(toggle);`maximize()` override 为 no-op 防双触发 |
 | `pane-increase/decrease-*` | (默认无键) | `resize-pane -L/-R/-U/-D -t %id <n>` |
+| `home` / `end` | `Home` / `End` | 热键服务吃掉 keydown 后由 SessionTab 向 active pane `sendInput('\x1bOH' / '\x1bOF')`(`handleLineEditHotkey`;Tabby 自己的处理在 local/ssh/serial tab 类里,pane tab 继承的 Base 类没有);gateway 再把它转成 `send-keys End` 让 tmux 按 pane 的 TERM 编码 |
 
 ### 与 Tabby 默认占用的冲突比对依据
 
