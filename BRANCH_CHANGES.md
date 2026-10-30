@@ -125,7 +125,7 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 - `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（505 passed）皆通過。
 - `pnpm run format:check` 在此 CRLF checkout 上會整庫失敗，與本分支無關；被改到的檔案以 `prettier --check --end-of-line auto` 檢查通過。
 - 鍵盤互動在 Tabby 1.0.238 內手動驗證；`doc/PLAN_PREFIX_KEY.md` 的手動 checklist 未在建置機上全數跑過。
-- 第 7 項（焦點被搶）的修正只有單元測試與程式碼推導，尚未在 Tabby 內以「兩個分頁、同一個 session」的情境手動驗證。
+- 第 7 項（焦點被搶）已在 Tabby 1.0.238 內以「兩個分頁、同一個 session」的情境手動驗證：TUI 分頁連按 `prefix + Space` 持續有效，切回 tmux mode 分頁後可直接輸入。
 
 ## 改動統計
 
