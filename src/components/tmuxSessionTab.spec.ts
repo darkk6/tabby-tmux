@@ -333,6 +333,7 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
         existingController: unknown
         activeWindowId: number | null
         getFocusedTab: () => unknown
+        hasFocus: boolean
         ngOnInit(): void
         ngOnDestroy(): void
         handlePrefixKeydown(event: unknown): void
@@ -362,7 +363,9 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
             getWindowState: (id: number) => { name: string } | undefined
         }
         listener: (event: unknown) => void
+        hotkey$: Subject<string>
     }> {
+        const hotkey$ = new Subject<string>()
         const { TmuxSessionTabComponent: SessionTab } = await import('./tmuxSessionTab.component')
         const { TmuxPaneTabComponent: PaneTab } = await import('./tmuxPaneTab.component')
         const paneArea = { contains: (node: { inPane?: boolean }) => node?.inPane === true }
@@ -400,7 +403,7 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
             {},
             { detectChanges: vi.fn() },
             { nativeElement: host },
-            { hotkey$: new Subject<string>(), unfilteredHotkey$: new Subject<string>() },
+            { hotkey$, unfilteredHotkey$: new Subject<string>() },
             { run: (callback: () => void) => callback() },
             { changed$: new Subject<void>() },
             { create: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -427,7 +430,14 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
         ;(tab as unknown as { installPrefixKeyListener(): void }).installPrefixKeyListener()
         const call = host.addEventListener.mock.calls.find((args) => args[0] === 'keydown')
         expect(call?.[2]).toBe(true) // capture phase
-        return { tab, host, pane, controller, listener: call?.[1] as (event: unknown) => void }
+        return {
+            tab,
+            host,
+            pane,
+            controller,
+            listener: call?.[1] as (event: unknown) => void,
+            hotkey$,
+        }
     }
 
     it('reads the prefix and overlay style from config with safe fallbacks', async () => {
@@ -590,5 +600,38 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
         tab.ngOnDestroy()
         expect(tab.prefixPending).toBe(false)
         expect(host.removeEventListener).toHaveBeenCalledWith('keydown', listener, true)
+    })
+
+    describe('line-editing hotkeys', () => {
+        // Tabby's hotkey service swallows the Home/End keydown, and the handler
+        // that sends the sequence lives in the connection tab classes, which a
+        // tmux pane does not extend. The session tab sends it to the active pane.
+        it.each<[string, string]>([
+            ['home', '\x1bOH'],
+            ['end', '\x1bOF'],
+        ])('sends %s to the focused pane as %j', async (hotkey, sequence) => {
+            const { tab, pane, hotkey$ } = await createPrefixTab()
+            tab.hasFocus = true
+            hotkey$.next(hotkey)
+            expect(pane.sendInput).toHaveBeenCalledTimes(1)
+            expect(pane.sendInput).toHaveBeenCalledWith(sequence)
+        })
+
+        it('ignores the hotkeys while the session tab is not focused', async () => {
+            const { tab, pane, hotkey$ } = await createPrefixTab()
+            tab.hasFocus = false
+            hotkey$.next('home')
+            hotkey$.next('end')
+            expect(pane.sendInput).not.toHaveBeenCalled()
+        })
+
+        it('does not send anything for unrelated hotkeys', async () => {
+            const { tab, pane, hotkey$ } = await createPrefixTab()
+            tab.hasFocus = true
+            hotkey$.next('ctrl-c')
+            hotkey$.next('pane-maximize')
+            expect(pane.sendInput).not.toHaveBeenCalled()
+            expect(tab.handlePaneMaximizeHotkey).toHaveBeenCalledTimes(1)
+        })
     })
 })

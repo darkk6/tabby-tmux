@@ -1,6 +1,7 @@
 import { Subject } from 'rxjs'
 import { Logger, ConfigService } from 'tabby-core'
 import { createConditionalLogger, ConditionalLogger } from './logHelper'
+import { tmuxKeyNameForSequence } from './tmuxInputKeys'
 
 // Command flags
 export const TMUX_COMMAND_TOLERATE_ERRORS = 1 << 0
@@ -169,6 +170,18 @@ export class TmuxGateway {
      */
     sendKeys(data: Buffer, paneId: number): void {
         if (this.detachSent || this.disconnected) return
+
+        // A lone Home/End (plain or with modifiers) must reach the pane the
+        // way TUI tmux would encode it, not as the raw xterm sequence: zsh
+        // binds End through $terminfo[kend] (ESC [ 4 ~), which never matches
+        // xterm's ESC [ F. Hand such keys to tmux by name so it encodes them
+        // for the pane's TERM and cursor-key mode. See tmuxInputKeys.ts.
+        const keyName = tmuxKeyNameForSequence(data)
+        if (keyName) {
+            this.responseQueue.push({ type: 'direct-write' })
+            this.write(`send-keys -t %${paneId} ${keyName}\r`)
+            return
+        }
 
         const hex = data.toString('hex')
         if (hex.length > 0) {
