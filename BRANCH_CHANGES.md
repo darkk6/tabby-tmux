@@ -8,14 +8,15 @@
 
 ## 功能一覽
 
-| 功能                               | 設定鍵                                                   | 預設值                | 相關 commit          |
-| ---------------------------------- | -------------------------------------------------------- | --------------------- | -------------------- |
-| Force English UI                   | `tmuxPlugin.forceEnglish`                                | `false`               | `dd3fe43`            |
-| 進入 tmux mode 前詢問 session 名稱 | 無（沿用 `tmuxPlugin.defaultSessionName`）               | -                     | `d071dce`, `adb5d87` |
-| tmux prefix key 與按鍵提示 overlay | `tmuxPlugin.prefixKey` / `tmuxPlugin.prefixOverlayStyle` | `Ctrl-B` / bottom bar | `b1ff9b3`, `a4cc4c1` |
-| 視窗分頁顯示 tmux window index     | 無                                                       | -                     | `a7fbdd5`            |
-| 加大視窗分頁列                     | 無                                                       | -                     | `8337ad0`            |
-| Home/End 在 tmux pane 內無效       | 無                                                       | -                     | `bdd0e5c`            |
+| 功能                                | 設定鍵                                                   | 預設值                | 相關 commit          |
+| ----------------------------------- | -------------------------------------------------------- | --------------------- | -------------------- |
+| Force English UI                    | `tmuxPlugin.forceEnglish`                                | `false`               | `dd3fe43`            |
+| 進入 tmux mode 前詢問 session 名稱  | 無（沿用 `tmuxPlugin.defaultSessionName`）               | -                     | `d071dce`, `adb5d87` |
+| tmux prefix key 與按鍵提示 overlay  | `tmuxPlugin.prefixKey` / `tmuxPlugin.prefixOverlayStyle` | `Ctrl-B` / bottom bar | `b1ff9b3`, `a4cc4c1` |
+| 視窗分頁顯示 tmux window index      | 無                                                       | -                     | `a7fbdd5`            |
+| 加大視窗分頁列                      | 無                                                       | -                     | `8337ad0`            |
+| Home/End 在 tmux pane 內無效        | 無                                                       | -                     | `bdd0e5c`            |
+| 隱藏的 tmux mode 分頁不再搶鍵盤焦點 | 無                                                       | -                     | `db0e574`            |
 
 ## 1. Force English UI（`dd3fe43`）
 
@@ -102,12 +103,30 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 - 其他輸入（連續按鍵、貼上文字、滑鼠回報、xterm 與 tmux 編碼本來就相同的方向鍵等）維持原本的 `-H` 路徑。
 - 新增檔案：`src/tmuxInputKeys.ts`（含 spec）；修改 `src/gateway.ts`、`src/components/tmuxSessionTab.component.ts`、`doc/DESIGN_KEYBINDINGS.md`。
 
+## 7. 隱藏的 tmux mode 分頁不再搶鍵盤焦點（`db0e574`）
+
+修正「一個 Tabby 分頁在 tmux mode、另一個分頁用一般 `tmux attach` 進同一個 session」時，TUI 分頁按 `prefix + Space` 換排版只有第一次有效，之後要先點一下滑鼠才會再有反應的問題。
+
+- 原因：TUI 那邊換排版 → tmux 對 control mode client 送 `%layout-change` → `TmuxSessionTabComponent.syncLayout()` 對每個 pane `emitFocused()`，再經 `restoreActivePaneFocus()` → `focus()` → `emitFocused()`；
+  `BaseTerminalTabComponent` 訂閱 `focused$` 後會呼叫 `frontend.focus()` → `xterm.focus()`，而 Tabby 隱藏非作用中分頁的方式是 `.content-tab { left: -1000% }`，隱藏的 textarea 仍可被 focus，
+  於是鍵盤焦點被搶到畫面外的 tmux mode 分頁。之後在 TUI 分頁打的字其實進了隱藏 pane（一般字元經 `send-keys` 進同一個 pane，看起來正常），
+  但 prefix 被 tmux mode 分頁自己的 prefix 監聽器吞掉，tmux 根本沒收到。`handleActivePaneChanged()`（`%window-pane-changed`）是同一類路徑。
+  `XTermFrontend.focus()` 內建的防搶守衛只保護同一個 tab host 內的 input 與 ngb modal，擋不住另一個分頁的 xterm textarea。
+- 修法：`TmuxPaneTabComponent.ngOnInit()` 在 `super.ngOnInit()` 之後、自己的 `emitFocused()` 之前，用 `guardDomFocus()` 包住 xterm 的 `focus()`：
+  只有 owning session tab 的 `hasFocus` 為 true（Tabby 作用中的分頁）時才真的 focus。包在 xterm 這一層是因為 base `ngOnInit` 還有一次無條件的
+  `frontend.focus()`（內部 `setTimeout` 延後呼叫 `xterm.focus()`），守衛裝好後那次延後呼叫也會被攔到。
+  切回 tmux mode 分頁時 Tabby 對 session tab 發 `focused$`，`SplitTabComponent` 會重新 `focus(focusedTab)`，守衛放行，焦點回到正確的 pane。
+  pane 尚未 mount（`parent` 還沒被 `addTab` 設定）時一律不搶焦點，mount 後由 `restoreActivePaneFocus()` 補上。
+- 附帶效果：Tabby 啟動時還原多個分頁，非作用中的 tmux mode 分頁也不會再把焦點從作用中的分頁搶走。
+- 新增檔案：`src/paneDomFocus.ts`（含 spec）；修改 `src/components/tmuxPaneTab.component.ts`。
+
 ## 驗證狀態
 
-- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（498 passed）皆通過。
+- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（505 passed）皆通過。
 - `pnpm run format:check` 在此 CRLF checkout 上會整庫失敗，與本分支無關；被改到的檔案以 `prettier --check --end-of-line auto` 檢查通過。
 - 鍵盤互動在 Tabby 1.0.238 內手動驗證；`doc/PLAN_PREFIX_KEY.md` 的手動 checklist 未在建置機上全數跑過。
+- 第 7 項（焦點被搶）的修正只有單元測試與程式碼推導，尚未在 Tabby 內以「兩個分頁、同一個 session」的情境手動驗證。
 
 ## 改動統計
 
-相對 `master`：36 個檔案，+3331 / -51 行。
+相對 `master`：39 個檔案，+3507 / -51 行。
