@@ -2,6 +2,7 @@ import { Component, ElementRef, HostListener, Injector, Input, OnInit } from '@a
 import { first } from 'rxjs'
 import { BaseTerminalTabComponent } from 'tabby-terminal'
 import { MenuItemOptions } from 'tabby-core'
+import { DomFocusable, guardDomFocus } from '../paneDomFocus'
 import { TmuxController, TmuxPaneSession, SyncScope } from '../session'
 import { TmuxI18nService } from '../services/tmuxI18n.service'
 import { TmuxMenuService } from '../services/tmuxMenu.service'
@@ -45,6 +46,19 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
     get _tmuxActive(): boolean {
         const sessionTab = this.parent as any
         return !!sessionTab && (sessionTab as any).focusedTab === this
+    }
+
+    /**
+     * Whether the owning session tab is Tabby's active tab, i.e. the tab the
+     * user is looking at and typing into. Tabby's AppService emits focused$ /
+     * blurred$ on top-level tabs as the active tab changes, and
+     * BaseTabComponent mirrors that into `hasFocus`. Before the pane is
+     * mounted (`parent` not yet set by addTab) nothing may take DOM focus;
+     * restoreActivePaneFocus() focuses the right pane once it is mounted.
+     */
+    private isSessionTabActive(): boolean {
+        const sessionTab = this.parent as { hasFocus?: boolean } | null
+        return sessionTab?.hasFocus === true
     }
 
     /**
@@ -150,6 +164,18 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
         // We emit focus synchronously right after super.ngOnInit() so that
         // when setImmediate fires, hasFocus is already true.
         super.ngOnInit()
+
+        // Keep the xterm DOM focus inside Tabby's active tab (paneDomFocus.ts).
+        // The base class focuses the terminal on every focused$ event and
+        // once unconditionally in ngOnInit above; the session tab re-emits
+        // focused$ on every tmux-driven layout/active-pane change, which
+        // would otherwise steal the keyboard focus from whatever tab the user
+        // is typing in while this session tab is hidden. Installed before our
+        // own emitFocused() below so that one is governed too; it wraps the
+        // xterm instance (created with the frontend) so the deferred focus the
+        // base class already scheduled is caught as well.
+        const frontend = this.frontend as { xterm?: DomFocusable } | undefined
+        guardDomFocus(frontend?.xterm, () => this.isSessionTabActive())
 
         // Mark this tab as focused so the setImmediate in super.ngOnInit
         // will attach the frontend to the DOM element.
