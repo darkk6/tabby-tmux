@@ -22,7 +22,10 @@ variables:
             - release
         description: 'release: also tag the commit, publish the tarball and create a GitLab release'
     # Debian slim: node:22-alpine has no bash, which scripts/build.sh needs.
-    NODE_IMAGE: node:22-slim
+    # Pinned to a frozen patch tag: docker-mirror.synology.inc refuses images
+    # pushed less than 7 days ago, and floating tags like node:22-slim are
+    # rebuilt every few days.
+    NODE_IMAGE: node:22.20.0-bookworm-slim
     NPM_REGISTRY: https://npm.synology.inc
     PNPM_VERSION: '10'
     GIT_DEPTH: 1

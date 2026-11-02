@@ -46,7 +46,7 @@ scripts/build.sh bump       # BUILD_NUMBER +1
 
 ## GitLab CI（`.gitlab-ci.yml`）
 
-Runner tag `instance-runner`，image `node:22-slim`（alpine 沒有 bash），npm registry 走 `https://npm.synology.inc`（`NODE_EXTRA_CA_CERTS` 使用 runner 提供的 `$SYNO_INTRANET_CA`）。
+Runner tag `instance-runner`，image `node:22.20.0-bookworm-slim`（alpine 沒有 bash；要釘在不再更新的 patch tag，因為 `docker-mirror.synology.inc` 拒絕 7 天內 push 的 image，而 `node:22-slim` 這類 floating tag 幾天就重建一次），npm registry 走 `https://npm.synology.inc`（`NODE_EXTRA_CA_CERTS` 使用 runner 提供的 `$SYNO_INTRANET_CA`）。
 
 | Stage     | Job       | 何時執行                                 | 內容                                                                  |
 | --------- | --------- | ---------------------------------------- | --------------------------------------------------------------------- |
