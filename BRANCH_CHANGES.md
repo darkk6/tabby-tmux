@@ -17,7 +17,7 @@
 | 加大視窗分頁列                      | 無                                                       | -                     | `8337ad0`            |
 | Home/End 在 tmux pane 內無效        | 無                                                       | -                     | `bdd0e5c`            |
 | 隱藏的 tmux mode 分頁不再搶鍵盤焦點 | 無                                                       | -                     | `db0e574`            |
-| 中文等多位元組字元不再顯示成 �      | 無                                                       | -                     | `5721e8b`            |
+| 中文等多位元組字元不再顯示成 �      | 無                                                       | -                     | `5721e8b`, `7a7dce2`    |
 
 ## 1. Force English UI（`dd3fe43`）
 
@@ -132,7 +132,7 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 - 修法（gateway）：`executeData()` 改用 Buffer 累積、以 `0x0A` 切行；`%output` / `%extended-output` 在位元組層級解析（八進位跳脫轉 byte、其餘原樣複製），
   以 `executeLine(header, payload)` 傳給既有的分派邏輯，其他通知行與命令回應仍整行轉字串。gateway 的輸出契約是「tmux 送什麼位元組就轉什麼」。
 - 修法（session）：`TmuxPaneSession` 新增單一送出點 `emitPaneOutput()`：結尾若是不完整但合法的 UTF-8 前綴（最多 3 bytes）就先保留，接到下一次輸出前面；
-  沒有保留尾巴卻以 continuation byte 開頭的輸出，其前半段已被 snapshot 蓋住並完整畫出，所以直接丟掉這些孤兒位元組；
+  snapshot 之後的第一筆輸出若以 continuation byte 開頭，其前半段已被 snapshot 蓋住並完整畫出，所以丟掉這些孤兒位元組（其他時候原樣送出）；
   `feedSnapshot()` 套用 snapshot 時清掉尾巴（snapshot 已含完整字元）。尾巴只在實際送出的輸出之間傳遞，不受 `_pendingOutput` 依 sequence 丟棄的影響。
 - 非 UTF-8 輸出（二進位、Latin-1）不受影響：只有合法前綴會被暫留，下一塊接不上就原樣送出，結果與修改前相同，只是晚一拍。
 - 新增檔案：`src/utf8Boundary.ts`（含 spec）；修改 `src/gateway.ts`、`src/session.ts`，並在 `gateway.spec.ts`、`session.spec.ts` 加入封包切斷與 `%output` 切斷的回歸測試。
