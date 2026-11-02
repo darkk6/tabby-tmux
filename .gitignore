@@ -4,3 +4,4 @@ note.local.md
 .vfox.toml
 .vfox/
 .pnpm-store/
+/out
