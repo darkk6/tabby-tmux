@@ -1210,12 +1210,21 @@ describe('TmuxPaneSession UTF-8 reassembly', () => {
         expect(emitted.join('')).toBe('go 🚀!')
     })
 
-    it('drops continuation bytes that have nothing to attach to', () => {
+    it('drops continuation bytes the first output after a snapshot starts with', () => {
         // The first half of the character was in an output the snapshot
         // covered; the snapshot already rendered the whole character.
-        const { controller, emitted } = createLivePane()
+        const { controller, session, emitted } = createLivePane()
+        session.feedSnapshot(Buffer.from('RBAC 設'))
         controller.gateway.executeData(output(cjk.subarray(1), '定'))
-        expect(emitted.join('')).toBe('定')
+        controller.gateway.executeData(output(cjk.subarray(1), '!'))
+        // Only the first output after the snapshot is cleaned up.
+        expect(emitted.join('')).toBe('RBAC 設定' + cjk.subarray(1).toString() + '!')
+    })
+
+    it('passes leading continuation bytes through when no snapshot preceded them', () => {
+        const { controller, binary } = createLivePane()
+        controller.gateway.executeData(output(cjk.subarray(1), 'x'))
+        expect(Buffer.concat(binary)).toEqual(Buffer.concat([cjk.subarray(1), Buffer.from('x')]))
     })
 
     it('forgets the held tail when a snapshot replaces the screen', () => {

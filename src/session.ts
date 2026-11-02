@@ -40,6 +40,12 @@ export class TmuxPaneSession extends BaseSession {
      * screen content (see emitPaneOutput).
      */
     private _utf8Tail: Buffer | null = null
+    /**
+     * True until the first live output after a snapshot. Only that output
+     * can start with the second half of a character whose first half the
+     * snapshot already rendered (see emitPaneOutput).
+     */
+    private _firstOutputAfterSnapshot = false
 
     constructor(
         logger: Logger,
@@ -223,6 +229,7 @@ export class TmuxPaneSession extends BaseSession {
         // The snapshot shows every character tmux has processed, including one
         // whose first bytes were held back here; the tail is stale now.
         this._utf8Tail = null
+        this._firstOutputAfterSnapshot = true
     }
 
     /**
@@ -252,19 +259,21 @@ export class TmuxPaneSession extends BaseSession {
      * new incomplete tail, so every Buffer handed to Tabby decodes without
      * replacement characters.
      *
-     * Continuation bytes at the start of an output with no tail to attach to
-     * are the second half of a character whose first half was in an output
-     * the snapshot already covers (and rendered in full): drop them instead
-     * of showing them as U+FFFD.
+     * The first output after a snapshot may start with continuation bytes:
+     * the second half of a character whose first half was in an output the
+     * snapshot covers (and rendered in full). Drop them instead of showing
+     * them as U+FFFD. At any other time leading continuation bytes are the
+     * pane's own (invalid or non-UTF-8) data and pass through untouched.
      */
     private emitPaneOutput(data: Buffer): void {
         if (this._utf8Tail) {
             data = Buffer.concat([this._utf8Tail, data])
             this._utf8Tail = null
-        } else {
+        } else if (this._firstOutputAfterSnapshot) {
             const orphaned = leadingContinuationBytes(data)
             if (orphaned > 0) data = data.subarray(orphaned)
         }
+        this._firstOutputAfterSnapshot = false
         const cut = incompleteUtf8TailStart(data)
         if (cut < data.length) {
             this._utf8Tail = Buffer.from(data.subarray(cut))
