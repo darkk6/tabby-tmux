@@ -87,11 +87,30 @@ const releaseUrl = `${projectApi}/releases/${encodeURIComponent(tag)}`
     console.log(`uploaded ${packageUrl}`)
 }
 
+// The "## [<version>]" section of BRANCH_CHANGELOG.md, if there is one.
+const changelogSection = (version) => {
+    const file = path.join(repo, 'BRANCH_CHANGELOG.md')
+    if (!fs.existsSync(file)) return ''
+    const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+    const start = lines.findIndex((line) => line.startsWith(`## [${version}]`))
+    if (start === -1) return ''
+    const rest = lines.slice(start + 1)
+    const end = rest.findIndex((line) => line.startsWith('## '))
+    const body = (end === -1 ? rest : rest.slice(0, end)).join('\n').trim()
+    // Demote headings so they nest under the release page's own title.
+    return body.replace(/^#+ /gm, (hashes) => `#${hashes}`)
+}
+
 // 3. create tag + release
 {
+    const notes = changelogSection(version)
+    if (!notes) {
+        console.log(`no "## [${version}]" section in BRANCH_CHANGELOG.md; release notes omitted`)
+    }
     const description = [
         `Build of branch \`${ref}\` at ${sha} ([pipeline](${pipelineUrl})).`,
         '',
+        ...(notes ? ['## Changes', '', notes, ''] : []),
         '## Install',
         '',
         `1. Download \`${tarball}\` below.`,
