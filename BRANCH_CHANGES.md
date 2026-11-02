@@ -3,7 +3,8 @@
 本分支是 [ruanimal/tabby-tmux](https://github.com/ruanimal/tabby-tmux) 的個人修改版，基底為 upstream `master`（v1.6.1 + 一個 docs commit，`431584d`）。
 `master` 分支維持與 upstream 同步，所有個人修改都只放在 `darkk6`。
 
-本地建置與部署方式見 `deploy-tabby-tmux.sh`（repo 外），版本號格式為 `1.6.1+local-darkk6-<MMDD-HHMMSS>`，
+建置、部署與 GitLab CI 發布方式見 [doc/BUILD_AND_RELEASE.md](doc/BUILD_AND_RELEASE.md)（`scripts/build.sh`、`.gitlab-ci.yml`）。
+版本號格式為 `<upstream 版本>+[local-]<branch>-<五位流水號>`，例如本機 `1.6.1+local-darkk6-00012`、CI `1.6.1+darkk6-00012`；
 以 `+` build metadata 的方式附加，避免 Tabby 的 plugin 管理員把它當成舊版而要求升級。
 
 ## 功能一覽
