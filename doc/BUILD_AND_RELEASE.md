@@ -58,12 +58,12 @@ Tag pipeline 一律不跑（`workflow.rules`），避免 release 建出的 tag �
 
 ### 發布流程
 
-1. 在要發布的 branch 上 `scripts/build.sh bump`，commit `BUILD_NUMBER`（例如 `chore(release): build 00012`）並 push。
+1. 在要發布的 branch 上 `scripts/build.sh bump`，把 [BRANCH_CHANGELOG.md](../BRANCH_CHANGELOG.md) 的 `[Unreleased]` 改成新版本號（例如 `## [1.6.1+darkk6-00012] - 2026-11-02`），連同 `BUILD_NUMBER` 一起 commit（例如 `chore(release): build 00012`）並 push。
 2. GitLab → Build → Pipelines → **Run pipeline**，選 branch，Inputs 的 `build_type` 選 `release`（`spec:inputs` 定義，push 觸發的 pipeline 用預設值 `build`）。
 3. `release` job 會：
     1. 檢查 Release `v<version>` 是否已存在，存在就 fail（代表忘了 bump）。
     2. 把 `out/tabby-tmux-<version>.tgz` 上傳到 **Deploy → Package registry**（generic package `tabby-tmux`，version 同版本號）。
-    3. 用 Releases API 建立 tag + Release，Release 附上該 tgz 的下載連結與安裝步驟。
+    3. 用 Releases API 建立 tag + Release，Release 說明含 BRANCH_CHANGELOG.md 中該版本的段落（沒有就略過）、tgz 下載連結與安裝步驟。
        若同名 tag 早已存在而指向別的 commit，會把剛建的 Release 刪掉並 fail。
 
 全部只用 `CI_JOB_TOKEN`，不需要另外設 access token（job token 在 GitLab 17.11 讀不到 Tags API，所以用 Release 存在與否當第一道檢查）。
