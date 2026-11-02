@@ -15,6 +15,7 @@ import {
     splitWindowFlags,
 } from './tmuxKeymap'
 import { quoteTmuxArgument, normalizeRename, unescapeTmuxValue } from './tmuxRename'
+import { incompleteUtf8TailStart, leadingContinuationBytes } from './utf8Boundary'
 
 interface PaneOutputChunk {
     data: Buffer
@@ -30,6 +31,15 @@ export class TmuxPaneSession extends BaseSession {
      * multiple feedOutput calls.  Buffered until the closing ST arrives.
      */
     private _pendingTitleSeq: Buffer | null = null
+    /**
+     * Incomplete trailing UTF-8 character of the last emitted output, held
+     * back until the next output completes it. tmux forwards the pane's raw
+     * bytes and may split a character across two %output lines, and Tabby
+     * decodes each Buffer it receives on its own, so a split character would
+     * otherwise render as U+FFFD. Reset whenever a snapshot replaces the
+     * screen content (see emitPaneOutput).
+     */
+    private _utf8Tail: Buffer | null = null
 
     constructor(
         logger: Logger,
@@ -142,7 +152,7 @@ export class TmuxPaneSession extends BaseSession {
                             sequence === undefined ||
                             sequence > this._snapshotCovers)
                     ) {
-                        this.emitOutput(data)
+                        this.emitPaneOutput(data)
                     }
                 }
                 this._pendingOutput = []
@@ -185,6 +195,7 @@ export class TmuxPaneSession extends BaseSession {
     async destroy(): Promise<void> {
         this._destroyed = true
         this._pendingTitleSeq = null
+        this._utf8Tail = null
         await super.destroy()
         this.controller.unregisterPane(this.paneId)
     }
@@ -209,6 +220,9 @@ export class TmuxPaneSession extends BaseSession {
         // not interpret captured history as a new live transfer.
         this.output.next(data.toString('utf-8'))
         this.binaryOutput.next(data)
+        // The snapshot shows every character tmux has processed, including one
+        // whose first bytes were held back here; the tail is stale now.
+        this._utf8Tail = null
     }
 
     /**
@@ -228,8 +242,35 @@ export class TmuxPaneSession extends BaseSession {
                 this._pendingOutput.push({ data, sequence })
                 return
             }
-            this.emitOutput(data)
+            this.emitPaneOutput(data)
         }
+    }
+
+    /**
+     * Single emission point for live output. Joins the held-back tail of a
+     * split UTF-8 character with the bytes that complete it and holds back a
+     * new incomplete tail, so every Buffer handed to Tabby decodes without
+     * replacement characters.
+     *
+     * Continuation bytes at the start of an output with no tail to attach to
+     * are the second half of a character whose first half was in an output
+     * the snapshot already covers (and rendered in full): drop them instead
+     * of showing them as U+FFFD.
+     */
+    private emitPaneOutput(data: Buffer): void {
+        if (this._utf8Tail) {
+            data = Buffer.concat([this._utf8Tail, data])
+            this._utf8Tail = null
+        } else {
+            const orphaned = leadingContinuationBytes(data)
+            if (orphaned > 0) data = data.subarray(orphaned)
+        }
+        const cut = incompleteUtf8TailStart(data)
+        if (cut < data.length) {
+            this._utf8Tail = Buffer.from(data.subarray(cut))
+            data = data.subarray(0, cut)
+        }
+        if (data.length > 0) this.emitOutput(data)
     }
 
     /**

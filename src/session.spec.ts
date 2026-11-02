@@ -1147,3 +1147,97 @@ async function waitForWrite(
         await new Promise((resolve) => setTimeout(resolve, 5))
     }
 }
+
+describe('TmuxPaneSession UTF-8 reassembly', () => {
+    function createLivePane() {
+        const logger = createLoggerMock()
+        const configService = {
+            store: { tmuxPlugin: { commandTimeoutMs: 30 } },
+        } as unknown as ConfigService
+        const controller = new TmuxController(
+            logger,
+            null as unknown as Injector,
+            vi.fn(),
+            vi.fn(),
+            configService,
+        )
+        Object.assign(controller.gateway, { initialized: true, acceptNotifications: true })
+        const session = new TmuxPaneSession(createLoggerMock(), controller, 1)
+        // Grid applied and snapshot done: live output is written straight away.
+        Object.assign(session, { _gridDone: true })
+        const emitted: string[] = []
+        const binary: Buffer[] = []
+        session.output$.subscribe((text) => emitted.push(text))
+        session.binaryOutput$.subscribe((data) => binary.push(data))
+        return { controller, session, emitted, binary }
+    }
+
+    const cjk = Buffer.from('設') // e8 a8 ad
+    const output = (...parts: (Buffer | string)[]) =>
+        Buffer.concat([
+            Buffer.from('%output %1 '),
+            ...parts.map((p) => (typeof p === 'string' ? Buffer.from(p) : p)),
+            Buffer.from('\n'),
+        ])
+
+    it('joins a character tmux split across two %output lines', () => {
+        const { controller, emitted } = createLivePane()
+        controller.gateway.executeData(output('RBAC ', cjk.subarray(0, 1)))
+        controller.gateway.executeData(output(cjk.subarray(1), '定'))
+        expect(emitted.join('')).toBe('RBAC 設定')
+        expect(emitted.join('')).not.toContain('�')
+        // The first emission stops before the incomplete character.
+        expect(emitted[0]).toBe('RBAC ')
+    })
+
+    it('joins a character a PTY packet boundary split', () => {
+        const { controller, emitted } = createLivePane()
+        const line = output('我們的情況和 ', cjk, '定一樣')
+        const cut = line.indexOf(cjk) + 2
+        controller.gateway.executeData(line.subarray(0, cut))
+        controller.gateway.executeData(line.subarray(cut))
+        expect(emitted.join('')).toBe('我們的情況和 設定一樣')
+    })
+
+    it('carries a tail across more than one output when the character trickles in', () => {
+        const { controller, emitted } = createLivePane()
+        const emoji = Buffer.from('🚀')
+        controller.gateway.executeData(output('go ', emoji.subarray(0, 1)))
+        controller.gateway.executeData(output(emoji.subarray(1, 2)))
+        controller.gateway.executeData(output(emoji.subarray(2, 3)))
+        expect(emitted.join('')).toBe('go ')
+        controller.gateway.executeData(output(emoji.subarray(3), '!'))
+        expect(emitted.join('')).toBe('go 🚀!')
+    })
+
+    it('drops continuation bytes that have nothing to attach to', () => {
+        // The first half of the character was in an output the snapshot
+        // covered; the snapshot already rendered the whole character.
+        const { controller, emitted } = createLivePane()
+        controller.gateway.executeData(output(cjk.subarray(1), '定'))
+        expect(emitted.join('')).toBe('定')
+    })
+
+    it('forgets the held tail when a snapshot replaces the screen', () => {
+        const { controller, session, emitted } = createLivePane()
+        controller.gateway.executeData(output('RBAC ', cjk.subarray(0, 1)))
+        session.feedSnapshot(Buffer.from('RBAC 設'))
+        controller.gateway.executeData(output(cjk.subarray(1), '定'))
+        expect(emitted.join('')).toBe('RBAC RBAC 設定')
+    })
+
+    it('passes invalid UTF-8 through without losing bytes', () => {
+        const { controller, binary } = createLivePane()
+        // A lead byte followed by ASCII is not a split character: tmux sent
+        // garbage (or a non-UTF-8 program). Deliver it as-is, just later.
+        controller.gateway.executeData(output('a', Buffer.from([0xe8])))
+        controller.gateway.executeData(output('b'))
+        expect(Buffer.concat(binary)).toEqual(Buffer.from([0x61, 0xe8, 0x62]))
+    })
+
+    it('does not hold back a trailing SGR sequence or ASCII', () => {
+        const { controller, emitted } = createLivePane()
+        controller.gateway.executeData(output('\\033[31m設\\033[0m'))
+        expect(emitted).toEqual(['\x1b[31m設\x1b[0m'])
+    })
+})

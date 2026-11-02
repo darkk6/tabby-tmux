@@ -442,3 +442,80 @@ describe('TmuxGateway executeData buffering and DCS stripping', () => {
         await expect(p).resolves.toBe('ok')
     })
 })
+
+describe('TmuxGateway executeData byte handling', () => {
+    function collect(gateway: TmuxGateway): { paneId: number; data: Buffer; latency?: number }[] {
+        const outputs: { paneId: number; data: Buffer; latency?: number }[] = []
+        gateway.output$.subscribe((o) => outputs.push(o))
+        return outputs
+    }
+
+    it('keeps a CJK character intact when a packet boundary splits it', async () => {
+        const { gateway } = createGateway()
+        await initGateway(gateway)
+        const outputs = collect(gateway)
+        const line = Buffer.from('%output %1 RBAC 設定\r\n')
+        const cut = line.indexOf(Buffer.from('設')) + 1 // after the first of 3 bytes
+        gateway.executeData(line.subarray(0, cut))
+        expect(outputs).toHaveLength(0)
+        gateway.executeData(line.subarray(cut))
+        expect(outputs).toHaveLength(1)
+        expect(outputs[0].data.toString('utf-8')).toBe('RBAC 設定')
+    })
+
+    it('forwards the raw bytes when tmux splits a character across two %output lines', async () => {
+        const { gateway } = createGateway()
+        await initGateway(gateway)
+        const outputs = collect(gateway)
+        const cjk = Buffer.from('設')
+        gateway.executeData(
+            Buffer.concat([Buffer.from('%output %1 RBAC '), cjk.subarray(0, 1), Buffer.from('\n')]),
+        )
+        gateway.executeData(
+            Buffer.concat([Buffer.from('%output %1 '), cjk.subarray(1), Buffer.from('定\n')]),
+        )
+        expect(outputs).toHaveLength(2)
+        // The gateway's contract is "bytes exactly as tmux sent them"; the pane
+        // session joins them (see session.spec).
+        expect(outputs[0].data).toEqual(Buffer.concat([Buffer.from('RBAC '), cjk.subarray(0, 1)]))
+        expect(Buffer.concat(outputs.map((o) => o.data)).toString('utf-8')).toBe('RBAC 設定')
+    })
+
+    it('decodes octal escapes and keeps backslashes that are not escapes', async () => {
+        const { gateway } = createGateway()
+        await initGateway(gateway)
+        const outputs = collect(gateway)
+        gateway.executeData(Buffer.from('%output %1 a\\015\\012b\\x \\033[31m中\\\\\n'))
+        expect(outputs[0].data).toEqual(Buffer.from('a\r\nb\\x \x1b[31m中\\\\'))
+    })
+
+    it('strips DCS artifacts and a trailing ST around an %output line', async () => {
+        const { gateway } = createGateway()
+        await initGateway(gateway)
+        const outputs = collect(gateway)
+        gateway.executeData(Buffer.from('\x1bP1000p%output %1 abc\x1b\\\n'))
+        expect(outputs).toHaveLength(1)
+        expect(outputs[0].data.toString('utf-8')).toBe('abc')
+    })
+
+    it('parses %extended-output payloads as bytes too', async () => {
+        const { gateway } = createGateway()
+        await initGateway(gateway)
+        const outputs = collect(gateway)
+        const line = Buffer.from('%extended-output %3 250 : 設\n')
+        gateway.executeData(line.subarray(0, line.length - 2))
+        gateway.executeData(line.subarray(line.length - 2))
+        expect(outputs).toEqual([{ paneId: 3, latency: 0.25, data: Buffer.from('設') }])
+    })
+
+    it('still decodes multi-byte text in command responses split across packets', async () => {
+        const { gateway } = createGateway()
+        await initGateway(gateway)
+        const response = gateway.sendCommand('display-message -p "#{pane_title}"')
+        const packet = Buffer.from('%begin 1 2 1\n設定\n%end 1 2 1\n')
+        const cut = packet.indexOf(Buffer.from('定')) + 2
+        gateway.executeData(packet.subarray(0, cut))
+        gateway.executeData(packet.subarray(cut))
+        await expect(response).resolves.toBe('設定')
+    })
+})

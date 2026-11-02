@@ -51,8 +51,8 @@ export class TmuxGateway {
     private detachSent = false
     private acceptNotifications = false
     private initialized = false
-    /** Incomplete line buffer for byte-level DCS parsing */
-    private lineBuffer = ''
+    /** Incomplete trailing line of the previous PTY packet, kept as bytes */
+    private lineBuffer: Buffer = Buffer.alloc(0)
 
     // Events for notifications
     public output$ = new Subject<{ paneId: number; data: Buffer; latency?: number }>()
@@ -220,20 +220,67 @@ export class TmuxGateway {
      * are outside a response block.
      */
     executeData(data: Buffer): void {
-        this.lineBuffer += data.toString('utf-8')
-
+        // Split on bytes, not on a decoded string: a PTY/SSH packet boundary
+        // can fall inside a multi-byte UTF-8 character of an %output payload,
+        // and decoding each packet on its own would turn both halves into
+        // U+FFFD replacement characters.
+        const buffer = this.lineBuffer.length > 0 ? Buffer.concat([this.lineBuffer, data]) : data
+        let start = 0
         let newlineIdx: number
-        while ((newlineIdx = this.lineBuffer.indexOf('\n')) !== -1) {
-            const rawLine = this.lineBuffer.substring(0, newlineIdx)
-            this.lineBuffer = this.lineBuffer.substring(newlineIdx + 1)
-            this.executeLine(rawLine.replace(/\r$/, ''))
+        while ((newlineIdx = buffer.indexOf(0x0a, start)) !== -1) {
+            let end = newlineIdx
+            if (end > start && buffer[end - 1] === 0x0d) end--
+            this.executeLineBytes(buffer.subarray(start, end))
+            start = newlineIdx + 1
         }
+        // Copy the leftover so the packet it came from can be released.
+        this.lineBuffer =
+            start < buffer.length ? Buffer.from(buffer.subarray(start)) : Buffer.alloc(0)
     }
 
     /**
-     * Process a single complete line from tmux control mode
+     * Dispatch one complete protocol line received as bytes.
+     *
+     * %output / %extended-output payloads stay bytes: tmux forwards the pane's
+     * raw UTF-8 (only bytes below 0x20 and the backslash are octal-escaped)
+     * and may split a character across two %output lines, so the payload must
+     * not be decoded to a string here. Every other line is complete text.
      */
-    executeLine(line: string): void {
+    private executeLineBytes(raw: Buffer): void {
+        const payloadStart = this.outputPayloadStart(raw)
+        if (payloadStart === -1) {
+            this.executeLine(raw.toString('utf-8'))
+            return
+        }
+        // Same artifact as executeLine's trailing-ST strip. tmux octal-escapes
+        // every payload byte below 0x20, so a raw ESC can only be an artifact.
+        let end = raw.length
+        if (end >= 2 && raw[end - 2] === 0x1b && raw[end - 1] === 0x5c) end -= 2
+        this.executeLine(raw.toString('latin1', 0, payloadStart), raw.subarray(payloadStart, end))
+    }
+
+    /**
+     * Byte offset where an %output / %extended-output payload starts (after
+     * the DCS artifacts executeLine strips and the header), or -1 when the
+     * line is not pane output.
+     */
+    private outputPayloadStart(raw: Buffer): number {
+        // latin1 maps one byte to one char, so string offsets are byte offsets.
+        const head = raw.toString('latin1', 0, Math.min(raw.length, 64))
+        const match = /^(?:\x1bP\d+p|P\d+p)?(?:%output %\d+ |%extended-output %\d+ \d+ : )/.exec(
+            head,
+        )
+        return match ? match[0].length : -1
+    }
+
+    /**
+     * Process a single complete line from tmux control mode.
+     *
+     * `payload` carries the undecoded bytes of an %output / %extended-output
+     * line (see executeLineBytes); `line` is then just the header. Without it
+     * the whole line, payload included, is parsed from the string.
+     */
+    executeLine(line: string, payload?: Buffer): void {
         // Strip DCS artifacts
         line = line
             .replace(/^\x1bP\d+p/, '')
@@ -247,7 +294,10 @@ export class TmuxGateway {
             return
         }
 
-        this.log.info(`Received: ${line.substring(0, 100)}${line.length > 100 ? '...' : ''}`)
+        this.log.info(
+            `Received: ${line.substring(0, 100)}${line.length > 100 ? '...' : ''}` +
+                (payload ? ` [${payload.length} payload bytes]` : ''),
+        )
 
         // Handle response blocks
         if (this.inResponseBlock) {
@@ -270,9 +320,9 @@ export class TmuxGateway {
                 // response (e.g. capture-pane) and the live output is lost.
                 if (this.acceptNotifications) {
                     if (line.startsWith('%output ')) {
-                        this.parseOutput(line)
+                        this.parseOutput(line, payload)
                     } else {
-                        this.parseExtendedOutput(line)
+                        this.parseExtendedOutput(line, payload)
                     }
                 }
                 return
@@ -289,7 +339,7 @@ export class TmuxGateway {
         } else if (line.startsWith('%output ')) {
             if (this.acceptNotifications) {
                 this.log.info(`Parsing output line: ${line.substring(0, 50)}...`)
-                this.parseOutput(line)
+                this.parseOutput(line, payload)
             } else {
                 this.log.warn(
                     `Ignored output (not accepting notifications): ${line.substring(0, 50)}...`,
@@ -297,7 +347,7 @@ export class TmuxGateway {
             }
         } else if (line.startsWith('%extended-output ')) {
             if (this.acceptNotifications) {
-                this.parseExtendedOutput(line)
+                this.parseExtendedOutput(line, payload)
             }
         } else if (line.startsWith('%layout-change ')) {
             if (this.acceptNotifications) {
@@ -404,7 +454,7 @@ export class TmuxGateway {
         }
     }
 
-    private parseOutput(line: string): void {
+    private parseOutput(line: string, payload?: Buffer): void {
         // %output %<pane> <data>
         const match = line.match(/^%output %(\d+) (.*)$/)
         if (!match) {
@@ -413,21 +463,19 @@ export class TmuxGateway {
         }
 
         const paneId = parseInt(match[1])
-        const data = this.decodeOutput(match[2])
-        this.log.info(
-            `Parsed output for pane %${paneId}: ${data.length} bytes (match_len=${match[2].length})`,
-        )
+        const data = payload ? this.decodeOutputBytes(payload) : this.decodeOutput(match[2])
+        this.log.info(`Parsed output for pane %${paneId}: ${data.length} bytes`)
         this.output$.next({ paneId, data })
     }
 
-    private parseExtendedOutput(line: string): void {
+    private parseExtendedOutput(line: string, payload?: Buffer): void {
         // %extended-output %<pane> <latency> : <data>
         const match = line.match(/^%extended-output %(\d+) (\d+) : (.*)$/)
         if (!match) return
 
         const paneId = parseInt(match[1])
         const latency = parseInt(match[2]) / 1000 // Convert ms to seconds
-        const data = this.decodeOutput(match[3])
+        const data = payload ? this.decodeOutputBytes(payload) : this.decodeOutput(match[3])
         this.output$.next({ paneId, data, latency })
     }
 
@@ -536,7 +584,7 @@ export class TmuxGateway {
         this.currentResponse = []
         this.inResponseBlock = false
         this.acceptNotifications = false
-        this.lineBuffer = ''
+        this.lineBuffer = Buffer.alloc(0)
     }
 
     // --- Utility Methods ---
@@ -546,33 +594,41 @@ export class TmuxGateway {
     }
 
     /**
-     * Decode tmux octal-escaped output to Buffer
+     * Decode an %output payload: tmux octal-escapes bytes below 0x20 and the
+     * backslash as \ooo and sends every other byte raw, UTF-8 included. The
+     * bytes are forwarded exactly as tmux sent them — a character split
+     * across two payloads is reassembled by TmuxPaneSession, not here.
+     * Returns a copy, so the packet the payload came from can be released.
      */
-    private decodeOutput(str: string): Buffer {
-        const bytes: number[] = []
-        for (let i = 0; i < str.length; i++) {
-            if (str[i] === '\\' && i + 3 < str.length) {
-                const octal = str.substring(i + 1, i + 4)
-                if (/^[0-7]{3}$/.test(octal)) {
-                    bytes.push(parseInt(octal, 8))
-                    i += 3
-                    continue
-                }
+    private decodeOutputBytes(payload: Buffer): Buffer {
+        if (payload.indexOf(0x5c) === -1) return Buffer.from(payload)
+        const isOctal = (b: number) => b >= 0x30 && b <= 0x37
+        const out = Buffer.allocUnsafe(payload.length)
+        let n = 0
+        for (let i = 0; i < payload.length; i++) {
+            const b = payload[i]
+            if (
+                b === 0x5c &&
+                i + 3 < payload.length &&
+                isOctal(payload[i + 1]) &&
+                isOctal(payload[i + 2]) &&
+                isOctal(payload[i + 3])
+            ) {
+                out[n++] =
+                    ((payload[i + 1] - 0x30) << 6) |
+                    ((payload[i + 2] - 0x30) << 3) |
+                    (payload[i + 3] - 0x30)
+                i += 3
+                continue
             }
-            // Handle UTF-8 and UTF-16 surrogate pairs properly
-            const codePoint = str.codePointAt(i)
-            if (codePoint !== undefined) {
-                const charStr = String.fromCodePoint(codePoint)
-                const buf = Buffer.from(charStr, 'utf-8')
-                for (const byte of buf) {
-                    bytes.push(byte)
-                }
-                if (codePoint > 0xffff) {
-                    i++ // Skip the second surrogate code unit
-                }
-            }
+            out[n++] = b
         }
-        return Buffer.from(bytes)
+        return out.subarray(0, n)
+    }
+
+    /** Decode an %output payload given as a string (lines fed via executeLine). */
+    private decodeOutput(str: string): Buffer {
+        return this.decodeOutputBytes(Buffer.from(str, 'utf-8'))
     }
 
     private unescapeTmuxWindowName(name: string): string {
