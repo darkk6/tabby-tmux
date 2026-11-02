@@ -1,6 +1,6 @@
 # tabby-tmux
 
-[English](README.md)
+[English](UPSTREAM_README.md) · [darkk6 分支說明](README.md)
 
 [![Build](https://github.com/ruanimal/tabby-tmux/actions/workflows/build.yml/badge.svg)](https://github.com/ruanimal/tabby-tmux/actions/workflows/build.yml)
 [![npm version](https://img.shields.io/npm/v/tabby-tmux)](https://www.npmjs.com/package/tabby-tmux)
