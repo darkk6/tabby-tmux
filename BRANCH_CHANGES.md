@@ -17,6 +17,7 @@
 | 加大視窗分頁列                      | 無                                                       | -                     | `8337ad0`            |
 | Home/End 在 tmux pane 內無效        | 無                                                       | -                     | `bdd0e5c`            |
 | 隱藏的 tmux mode 分頁不再搶鍵盤焦點 | 無                                                       | -                     | `db0e574`            |
+| 中文等多位元組字元不再顯示成 �      | 無                                                       | -                     | `5721e8b`            |
 
 ## 1. Force English UI（`dd3fe43`）
 
@@ -120,13 +121,29 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 - 附帶效果：Tabby 啟動時還原多個分頁，非作用中的 tmux mode 分頁也不會再把焦點從作用中的分頁搶走。
 - 新增檔案：`src/paneDomFocus.ts`（含 spec）；修改 `src/components/tmuxPaneTab.component.ts`。
 
+## 8. 中文等多位元組字元不再顯示成 �（`5721e8b`）
+
+修正 pane 內的 CJK 字元偶爾變成 `���` 或 `��`，在 Claude Code 這類會整個畫面重繪、帶大量顏色碼的 TUI 裡特別常見；按 `Ctrl+L` 有時會好、有時壞字換位置的問題。
+
+- 原因：tmux control mode 的 `%output` 把 pane 的 UTF-8 位元組原樣送出（只跳脫 0x20 以下與反斜線），而且 tmux 讀到多少就送多少、每行 payload 另有位元組上限，兩者都不對齊字元邊界，
+  所以一個 3 bytes 的中文字可能被切在兩行 `%output` 之間，或被切在兩個 SSH/PTY 封包之間。plugin 原本把每個封包 `toString('utf-8')`、再把每行 `%output` 單獨解碼成 Buffer，
+  而 Tabby 的 session 層也是逐個 Buffer `toString()`，三處都是一次性解碼：殘缺的前半段變成 �，下一塊的後半段也變成 �（切在第 1 byte 後是 3 個 �，第 2 byte 後是 2 個 �）。
+  tmux 自己的 pane 內容是對的，壞的只有 Tabby 這端的畫面；`Ctrl+L` 讓程式重畫，輸出重新切塊，切點換位置而已。
+- 修法（gateway）：`executeData()` 改用 Buffer 累積、以 `0x0A` 切行；`%output` / `%extended-output` 在位元組層級解析（八進位跳脫轉 byte、其餘原樣複製），
+  以 `executeLine(header, payload)` 傳給既有的分派邏輯，其他通知行與命令回應仍整行轉字串。gateway 的輸出契約是「tmux 送什麼位元組就轉什麼」。
+- 修法（session）：`TmuxPaneSession` 新增單一送出點 `emitPaneOutput()`：結尾若是不完整但合法的 UTF-8 前綴（最多 3 bytes）就先保留，接到下一次輸出前面；
+  沒有保留尾巴卻以 continuation byte 開頭的輸出，其前半段已被 snapshot 蓋住並完整畫出，所以直接丟掉這些孤兒位元組；
+  `feedSnapshot()` 套用 snapshot 時清掉尾巴（snapshot 已含完整字元）。尾巴只在實際送出的輸出之間傳遞，不受 `_pendingOutput` 依 sequence 丟棄的影響。
+- 非 UTF-8 輸出（二進位、Latin-1）不受影響：只有合法前綴會被暫留，下一塊接不上就原樣送出，結果與修改前相同，只是晚一拍。
+- 新增檔案：`src/utf8Boundary.ts`（含 spec）；修改 `src/gateway.ts`、`src/session.ts`，並在 `gateway.spec.ts`、`session.spec.ts` 加入封包切斷與 `%output` 切斷的回歸測試。
+
 ## 驗證狀態
 
-- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（505 passed）皆通過。
+- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（525 passed）皆通過。
 - `pnpm run format:check` 在此 CRLF checkout 上會整庫失敗，與本分支無關；被改到的檔案以 `prettier --check --end-of-line auto` 檢查通過。
 - 鍵盤互動在 Tabby 1.0.238 內手動驗證；`doc/PLAN_PREFIX_KEY.md` 的手動 checklist 未在建置機上全數跑過。
 - 第 7 項（焦點被搶）已在 Tabby 1.0.238 內以「兩個分頁、同一個 session」的情境手動驗證：TUI 分頁連按 `prefix + Space` 持續有效，切回 tmux mode 分頁後可直接輸入。
 
 ## 改動統計
 
-相對 `master`：39 個檔案，+3507 / -51 行。
+相對 `master`：43 個檔案，+3957 / -100 行。
