@@ -52,14 +52,14 @@ Runner tag `instance-runner`，image `node:22.20.0-bookworm-slim`（alpine 沒�
 | --------- | --------- | ---------------------------------------- | --------------------------------------------------------------------- |
 | `test`    | `test`    | 每次 push、手動 Run pipeline             | `pnpm install --frozen-lockfile`、lint、typecheck、format:check、test |
 | `build`   | `build`   | test 通過後                              | `scripts/build.sh`；`out/` 保存為 artifact 兩週                       |
-| `release` | `release` | 只在 Run pipeline 選 `BUILD_TYPE=release` | `scripts/release.mjs`，見下                                           |
+| `release` | `release` | 只在 Run pipeline 的 input `build_type` 選 `release` | `scripts/release.mjs`，見下                                           |
 
 Tag pipeline 一律不跑（`workflow.rules`），避免 release 建出的 tag 又觸發一次 pipeline。
 
 ### 發布流程
 
 1. 在要發布的 branch 上 `scripts/build.sh bump`，commit `BUILD_NUMBER`（例如 `chore(release): build 00012`）並 push。
-2. GitLab → Build → Pipelines → **Run pipeline**，選 branch，`BUILD_TYPE` 選 `release`。
+2. GitLab → Build → Pipelines → **Run pipeline**，選 branch，Inputs 的 `build_type` 選 `release`（`spec:inputs` 定義，push 觸發的 pipeline 用預設值 `build`）。
 3. `release` job 會：
     1. 檢查 Release `v<version>` 是否已存在，存在就 fail（代表忘了 bump）。
     2. 把 `out/tabby-tmux-<version>.tgz` 上傳到 **Deploy → Package registry**（generic package `tabby-tmux`，version 同版本號）。
