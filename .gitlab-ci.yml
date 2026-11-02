@@ -1,0 +1,86 @@
+# GitLab CI for the darkk6 fork (git.synology.inc/luchunpan/tabby-tmux).
+#
+#   push to any branch        test -> build            (artifacts: out/)
+#   Run pipeline, BUILD_TYPE  test -> build -> release (tag + release + package)
+#     = release
+#
+# The release job creates the tag v<version>; tag pipelines are skipped so that
+# the new tag does not start a second pipeline. Bump BUILD_NUMBER and commit
+# before running a release, otherwise the job fails on the existing tag.
+
+workflow:
+    rules:
+        - if: $CI_COMMIT_TAG
+          when: never
+        - if: $CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api"
+
+variables:
+    BUILD_TYPE:
+        value: build
+        options:
+            - build
+            - release
+        description: 'release: also tag the commit, publish the tarball and create a GitLab release'
+    # Debian slim: node:22-alpine has no bash, which scripts/build.sh needs.
+    NODE_IMAGE: node:22-slim
+    NPM_REGISTRY: https://npm.synology.inc
+    PNPM_VERSION: '10'
+    GIT_DEPTH: 1
+
+stages:
+    - test
+    - build
+    - release
+
+default:
+    image: $NODE_IMAGE
+    tags:
+        - instance-runner
+    interruptible: true
+    before_script:
+        - if [ -f "$SYNO_INTRANET_CA" ]; then export NODE_EXTRA_CA_CERTS="$SYNO_INTRANET_CA"; fi
+        - export NPM_CONFIG_REGISTRY="$NPM_REGISTRY"
+        - npm install --global "pnpm@$PNPM_VERSION"
+        - pnpm config set store-dir "$CI_PROJECT_DIR/.pnpm-store"
+    cache:
+        key:
+            files:
+                - pnpm-lock.yaml
+        paths:
+            - .pnpm-store
+
+test:
+    stage: test
+    script:
+        - pnpm install --frozen-lockfile
+        - pnpm run lint
+        - pnpm run typecheck
+        - pnpm run format:check
+        - pnpm test
+
+build:
+    stage: build
+    script:
+        - pnpm install --frozen-lockfile
+        - bash scripts/build.sh
+    artifacts:
+        name: tabby-tmux-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA
+        paths:
+            - out/
+        reports:
+            dotenv: out/build.env
+        expire_in: 2 weeks
+
+release:
+    stage: release
+    rules:
+        - if: $BUILD_TYPE == "release"
+    interruptible: false
+    before_script:
+        # git.synology.inc is signed by the intranet CA; node's fetch needs it.
+        - if [ -f "$SYNO_INTRANET_CA" ]; then export NODE_EXTRA_CA_CERTS="$SYNO_INTRANET_CA"; fi
+    cache: []
+    needs:
+        - build
+    script:
+        - node scripts/release.mjs
