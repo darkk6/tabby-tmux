@@ -246,6 +246,8 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
     /** Optimistic window target used to update the title before pane views finish mounting. */
     private pendingTitleWindowId: number | null = null
     connected = false
+    /** Set once this tab starts destroying; read by TmuxPaneTabComponent.destroy(). */
+    isTearingDown = false
     /** Session-level search panel state (replaces the built-in per-pane panel) */
     searchPanelOpen = false
     searchPanelFrontend: Frontend | null = null
@@ -1579,7 +1581,7 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
                     ;(paneTab as any).emitVisibility(false)
                     this.detachPaneView(paneTab as any)
                 }
-                ;(paneTab as any).destroy()
+                void paneTab.destroyLocal()
             }
             this.windowPaneTabs.delete(windowId)
         }
@@ -1711,7 +1713,7 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
                         paneMap.delete(paneId)
                         ;(paneTab as any).emitVisibility(false)
                         this.detachPaneView(paneTab as any)
-                        ;(paneTab as any).destroy()
+                        void paneTab.destroyLocal()
                     }
                 }
             }
@@ -1770,7 +1772,7 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
             this.detachPaneView(paneTab as any)
             this.cdr.detectChanges()
         }
-        ;(paneTab as any).destroy()
+        void paneTab.destroyLocal()
     }
 
     /**
@@ -2349,6 +2351,16 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
         }
         this.clearDividers()
         super.ngOnDestroy()
+    }
+
+    /**
+     * SplitTabComponent.destroy() destroys every mounted pane tab. Flag the
+     * teardown first so TmuxPaneTabComponent.destroy() only cleans up locally
+     * instead of turning each call into kill-pane.
+     */
+    override destroy(): void {
+        this.isTearingDown = true
+        super.destroy()
     }
 
     override async canClose(): Promise<boolean> {
