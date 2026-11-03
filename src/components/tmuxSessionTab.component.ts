@@ -2232,6 +2232,41 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
                     })
                 }
                 break
+            case 'next-layout':
+                if (paneId !== null) {
+                    controller.nextLayout(paneId).catch(() => {
+                        /* tmux may reject during detach */
+                    })
+                }
+                break
+            case 'select-layout':
+                if (paneId !== null) {
+                    controller.selectLayout(paneId, action.layout).catch(() => {
+                        /* tmux may reject during detach */
+                    })
+                }
+                break
+            case 'spread-layout':
+                if (paneId !== null) {
+                    controller.spreadLayout(paneId).catch(() => {
+                        /* tmux may reject during detach */
+                    })
+                }
+                break
+            case 'swap-pane':
+                if (paneId !== null) {
+                    controller.swapPane(paneId, action.dir).catch(() => {
+                        /* tmux may reject during detach */
+                    })
+                }
+                break
+            case 'rotate-window':
+                if (paneId !== null) {
+                    controller.rotateWindow(paneId, action.dir).catch(() => {
+                        /* tmux may reject during detach */
+                    })
+                }
+                break
             case 'detach':
                 this.onDisconnect()
                 break

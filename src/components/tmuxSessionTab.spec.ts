@@ -359,6 +359,11 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
         controller: {
             killPane: ReturnType<typeof vi.fn>
             splitWindow: ReturnType<typeof vi.fn>
+            nextLayout: ReturnType<typeof vi.fn>
+            selectLayout: ReturnType<typeof vi.fn>
+            spreadLayout: ReturnType<typeof vi.fn>
+            swapPane: ReturnType<typeof vi.fn>
+            rotateWindow: ReturnType<typeof vi.fn>
             getAllWindowStates: () => Array<{ id: number; name: string; index?: number }>
             getWindowState: (id: number) => { name: string } | undefined
         }
@@ -387,6 +392,11 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
             getPaneTitle: () => 'terminal',
             killPane: vi.fn().mockResolvedValue(undefined),
             splitWindow: vi.fn().mockResolvedValue(undefined),
+            nextLayout: vi.fn().mockResolvedValue(undefined),
+            selectLayout: vi.fn().mockResolvedValue(undefined),
+            spreadLayout: vi.fn().mockResolvedValue(undefined),
+            swapPane: vi.fn().mockResolvedValue(undefined),
+            rotateWindow: vi.fn().mockResolvedValue(undefined),
             getAllWindowStates: () => [
                 { id: 11, name: 'shell', index: 0, panes: new Set<number>([9]) },
                 { id: 12, name: 'build', index: 3, panes: new Set<number>() },
@@ -564,6 +574,28 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
         expect(tab.onCreateWindow).toHaveBeenCalled()
         press('p')
         expect(tab.switchWindowByOffset).toHaveBeenCalledWith(-1)
+    })
+
+    it('routes layout, swap and rotate keys to the focused pane window', async () => {
+        const { listener, controller } = await createPrefixTab()
+        const press = (key: string, options: Partial<Omit<FakeEvent, 'key'>> = {}) => {
+            listener(keyEvent('b', { ctrlKey: true }))
+            listener(keyEvent(key, options))
+        }
+        press(' ', { code: 'Space' })
+        expect(controller.nextLayout).toHaveBeenCalledWith(9)
+        press('3', { code: 'Digit3', altKey: true })
+        expect(controller.selectLayout).toHaveBeenCalledWith(9, 'main-horizontal')
+        press('E', { shiftKey: true })
+        expect(controller.spreadLayout).toHaveBeenCalledWith(9)
+        press('{', { code: 'BracketLeft', shiftKey: true })
+        expect(controller.swapPane).toHaveBeenCalledWith(9, 'up')
+        press('}', { code: 'BracketRight', shiftKey: true })
+        expect(controller.swapPane).toHaveBeenCalledWith(9, 'down')
+        press('o', { ctrlKey: true })
+        expect(controller.rotateWindow).toHaveBeenCalledWith(9, 'up')
+        press('o', { code: 'KeyO', altKey: true })
+        expect(controller.rotateWindow).toHaveBeenCalledWith(9, 'down')
     })
 
     it('asks for confirmation before killing a pane or a window', async () => {

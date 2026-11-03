@@ -156,6 +156,10 @@ describe('resolvePrefixAction', () => {
         ['o', { type: 'next-pane' }],
         ['z', { type: 'zoom' }],
         ['x', { type: 'kill-pane' }],
+        [' ', { type: 'next-layout' }],
+        ['E', { type: 'spread-layout' }],
+        ['{', { type: 'swap-pane', dir: 'up' }],
+        ['}', { type: 'swap-pane', dir: 'down' }],
         ['d', { type: 'detach' }],
     ])('maps %s', (pressed, expected) => {
         expect(resolvePrefixAction(key({ key: pressed, code: 'KeyX' }), prefix, 'win32')).toEqual(
@@ -204,6 +208,45 @@ describe('resolvePrefixAction', () => {
         expect(resolvePrefixAction(key({ key: 'a', ctrlKey: true }), prefix, 'win32')).toBe(null)
     })
 
+    it('maps C-o to rotate-window while a plain o stays next-pane', () => {
+        expect(resolvePrefixAction(key({ key: 'o', ctrlKey: true }), prefix, 'win32')).toEqual({
+            type: 'rotate-window',
+            dir: 'up',
+        })
+        expect(resolvePrefixAction(key({ key: 'o' }), prefix, 'win32')).toEqual({
+            type: 'next-pane',
+        })
+    })
+
+    it.each([
+        ['Digit1', 'even-horizontal'],
+        ['Digit2', 'even-vertical'],
+        ['Digit3', 'main-horizontal'],
+        ['Digit4', 'main-vertical'],
+        ['Digit5', 'tiled'],
+    ])('maps M-%s to a preset layout by scancode', (code, layout) => {
+        // macOS Option turns the digit into a symbol (⌥1 = ¡).
+        expect(
+            resolvePrefixAction(key({ key: '¡', code, altKey: true }), prefix, 'darwin'),
+        ).toEqual({ type: 'select-layout', layout })
+    })
+
+    it('maps M-o to reverse rotate-window and ignores other Alt combos', () => {
+        expect(
+            resolvePrefixAction(key({ key: 'ø', code: 'KeyO', altKey: true }), prefix, 'darwin'),
+        ).toEqual({ type: 'rotate-window', dir: 'down' })
+        expect(
+            resolvePrefixAction(key({ key: '6', code: 'Digit6', altKey: true }), prefix, 'win32'),
+        ).toBe(null)
+        expect(
+            resolvePrefixAction(
+                key({ key: '1', code: 'Digit1', altKey: true, ctrlKey: true }),
+                prefix,
+                'win32',
+            ),
+        ).toBe(null)
+    })
+
     it('returns null for unsupported keys and Alt/meta combos', () => {
         expect(resolvePrefixAction(key({ key: 'q' }), prefix, 'win32')).toBe(null)
         expect(resolvePrefixAction(key({ key: 'Escape', code: 'Escape' }), prefix, 'win32')).toBe(
@@ -220,7 +263,25 @@ describe('PREFIX_OVERLAY_GROUPS', () => {
         expect(keys.filter((k) => k === null)).toHaveLength(1)
         const listed = keys.filter((k): k is string => k !== null)
         expect(new Set(listed).size).toBe(listed.length)
-        for (const single of ['c', 'n', 'p', ',', '&', '%', '"', 'o', 'z', 'x', 'd']) {
+        for (const single of [
+            'c',
+            'n',
+            'p',
+            ',',
+            '&',
+            '%',
+            '"',
+            'o',
+            'z',
+            'x',
+            'd',
+            'Space',
+            'E',
+            '{',
+            '}',
+            'C-o',
+            'M-o',
+        ]) {
             expect(listed).toContain(single)
         }
     })

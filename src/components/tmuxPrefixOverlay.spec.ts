@@ -10,6 +10,12 @@ beforeAll(async () => {
     Overlay = (await import('./tmuxPrefixOverlay.component')).TmuxPrefixOverlayComponent
 })
 
+function sessionGroup(component: InstanceType<typeof Overlay>) {
+    const group = component.groups.find((g) => g.label === 'prefix.group.session')
+    if (!group) throw new Error('Missing session group')
+    return group
+}
+
 function createOverlay(prefixKey = 'Ctrl-B') {
     const languageChange$ = new Subject<string>()
     const i18n = {
@@ -24,11 +30,12 @@ function createOverlay(prefixKey = 'Ctrl-B') {
 }
 
 describe('TmuxPrefixOverlayComponent', () => {
-    it('lists the three groups with translated labels', () => {
+    it('lists the groups with translated labels', () => {
         const { component } = createOverlay()
         expect(component.groups.map((group) => group.label)).toEqual([
             'prefix.group.windows',
             'prefix.group.panes',
+            'prefix.group.layout',
             'prefix.group.session',
         ])
         // Every row label receives the prefix param (only sendPrefix uses it).
@@ -42,7 +49,7 @@ describe('TmuxPrefixOverlayComponent', () => {
     it('shows the configured prefix in the title and the send-prefix row', () => {
         const { component } = createOverlay('Ctrl-A')
         expect(component.title).toBe('prefix.title(Ctrl-A)')
-        const session = component.groups[2]
+        const session = sessionGroup(component)
         expect(session.rows).toContainEqual({ keys: 'Ctrl-A', label: 'prefix.sendPrefix(Ctrl-A)' })
     })
 
@@ -55,7 +62,7 @@ describe('TmuxPrefixOverlayComponent', () => {
         const before = component.groups
         languageChange$.next('zh')
         expect(component.groups).not.toBe(before)
-        expect(component.groups[2].rows[1].keys).toBe('Alt-X')
+        expect(sessionGroup(component).rows[1].keys).toBe('Alt-X')
         component.ngOnDestroy()
     })
 

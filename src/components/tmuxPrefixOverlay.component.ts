@@ -82,6 +82,10 @@ interface OverlayGroup {
             .prefix-overlay-bar .prefix-card {
                 pointer-events: auto;
                 width: 100%;
+                /* Small Tabby windows: scroll inside the strip instead of
+                   letting it grow past the top of the pane area. */
+                max-height: 100%;
+                overflow-y: auto;
                 padding: 6px 12px 8px;
                 box-sizing: border-box;
                 background: var(--theme-bg-more-2, rgba(30, 30, 30, 0.95));
@@ -94,6 +98,9 @@ interface OverlayGroup {
                 gap: 4px 28px;
             }
             .prefix-overlay-bar .prefix-group {
+                /* Shrinkable flex item: long labels wrap instead of
+                   overflowing a narrow window. */
+                min-width: 0;
                 display: grid;
                 grid-template-columns: auto auto;
                 column-gap: 18px;
@@ -136,7 +143,9 @@ interface OverlayGroup {
             }
             .prefix-overlay-modal .prefix-groups {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+                /* min(): a single full-width column when the card is
+                   narrower than one 230px column. */
+                grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
                 gap: 14px 32px;
             }
             .prefix-overlay-modal .prefix-group-title {
@@ -157,6 +166,7 @@ interface OverlayGroup {
             /* ── shared ── */
             .prefix-header {
                 display: flex;
+                flex-wrap: wrap;
                 align-items: baseline;
                 justify-content: space-between;
                 gap: 12px;
@@ -193,9 +203,13 @@ interface OverlayGroup {
                 line-height: 1.5;
                 text-align: center;
                 white-space: nowrap;
+                /* In the modal's flex rows a wide cap (M-1…5) must not be
+                   squeezed under its label. */
+                flex-shrink: 0;
             }
             .prefix-label {
-                white-space: nowrap;
+                min-width: 0;
+                overflow-wrap: anywhere;
             }
         `,
     ],
