@@ -25,6 +25,9 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
     @Input() hostProfile: HostProfile | null = null
     @Input() paneId: number
 
+    /** Set by destroyLocal(); see destroy(). */
+    private localDestroyRequested = false
+
     /**
      * Whether this pane is the active (keyboard-focused) pane in the tmux
      * session. Controls whether hotkey-triggered input (e.g. Ctrl+C, paste)
@@ -783,12 +786,35 @@ export class TmuxPaneTabComponent extends BaseTerminalTabComponent<any> implemen
     }
 
     /**
-     * Destroy only the local Tabby pane resources. A component lifecycle
-     * destroy is not an explicit tmux close operation: it can be triggered by
-     * closing the SessionTab or by tmux notifications. The context menu is the
-     * explicit user entry point that sends kill-pane instead.
+     * Destroy only the local Tabby pane resources — for the plugin's own
+     * teardown paths, where tmux already closed the pane or the whole session
+     * tab is going away. Never sends kill-pane.
+     */
+    async destroyLocal(): Promise<void> {
+        this.localDestroyRequested = true
+        await super.destroy()
+    }
+
+    /**
+     * Any other destroy() is a request from Tabby to close this pane — the
+     * native close-pane hotkey (SplitTabComponent calls focusedTab.destroy()),
+     * or another plugin. Closing a live tmux pane locally would leave it
+     * running in tmux, out of sync with the UI, so it is turned into
+     * kill-pane; tmux's %layout-change then removes the pane through
+     * destroyLocal(). Panes that are detached, untracked or whose session tab
+     * is tearing down are simply destroyed.
      */
     override async destroy(): Promise<void> {
+        const sessionTab = this.parent as { isTearingDown?: boolean } | null
+        if (
+            !this.localDestroyRequested &&
+            sessionTab &&
+            !sessionTab.isTearingDown &&
+            this.controller?.isPaneTracked(this.paneId)
+        ) {
+            await this.closePane()
+            return
+        }
         await super.destroy()
     }
 
