@@ -19,6 +19,8 @@
 | Home/End 在 tmux pane 內無效        | 無                                                       | -                     | `bdd0e5c`            |
 | 隱藏的 tmux mode 分頁不再搶鍵盤焦點 | 無                                                       | -                     | `db0e574`            |
 | 中文等多位元組字元不再顯示成 �      | 無                                                       | -                     | `5721e8b`, `7a7dce2` |
+| prefix 鍵加入 layout / 交換 / 輪轉  | 無（沿用 `tmuxPlugin.prefixKey`）                        | -                     | `6a9902c`            |
+| close-pane 熱鍵真的關掉 tmux pane   | 無                                                       | -                     | `629f322`            |
 
 ## 1. Force English UI（`dd3fe43`）
 
@@ -67,6 +69,8 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 | `x`             | 關閉 pane（會先確認）                         |
 | `d`             | detach（離開 tmux mode）                      |
 | prefix 再按一次 | 把 prefix 本身送進 pane（走 pane input 路徑） |
+
+layout、交換與輪轉 pane 的按鍵（`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`）之後才加入，見 [§9](#9-prefix-鍵加入-layout--交換--輪轉6a9902c)。
 
 - `Esc`、任何不支援的鍵、滑鼠點擊或失去 tab 焦點都會取消。
 - 第二鍵時 Ctrl 可以不放開（`Ctrl-B Ctrl-N` 等同 `Ctrl-B n`）；字母大小寫敏感，與 tmux 一致。
@@ -138,14 +142,48 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 - 非 UTF-8 輸出（二進位、Latin-1）不受影響：只有合法前綴會被暫留，下一塊接不上就原樣送出，結果與修改前相同，只是晚一拍。
 - 新增檔案：`src/utf8Boundary.ts`（含 spec）；修改 `src/gateway.ts`、`src/session.ts`，並在 `gateway.spec.ts`、`session.spec.ts` 加入封包切斷與 `%output` 切斷的回歸測試。
 
+## 9. prefix 鍵加入 layout / 交換 / 輪轉（`6a9902c`）
+
+補上 tmux 預設綁定裡排列 pane 的按鍵。每個鍵都只送一個 control mode 指令，目標是目前焦點所在的 pane（tmux 會解析成它所屬的 window）；
+畫面由 tmux 回傳的 `%layout-change` 驅動，與既有的分割、zoom 走同一條路，plugin 不自己改版面。
+
+| 鍵            | tmux 指令                                                                                 |
+| ------------- | ----------------------------------------------------------------------------------------- |
+| `Space`       | `next-layout`                                                                             |
+| `M-1`–`M-5`   | `select-layout` even-horizontal / even-vertical / main-horizontal / main-vertical / tiled |
+| `E`           | `select-layout -E`（平均分配 pane 大小）                                                  |
+| `{` / `}`     | `swap-pane -U` / `-D`（與上一個 / 下一個 pane 交換，焦點跟著原 pane）                     |
+| `C-o` / `M-o` | `rotate-window -U` / `-D`                                                                 |
+
+- `M-` 是 Alt（macOS 為 Option）。Alt 組合以 scancode（`event.code`）比對，因為 macOS 的 Option 會把 `event.key` 變成 `¡`、`ø` 這類符號；其他 Alt 組合與 ⌘ 組合仍然不對應任何動作。
+- `C-o` 原本因為「第二鍵忽略 Ctrl」而等同 `o`（下一個 pane），現在比照 tmux 改為 rotate-window；`o` 不變。
+- tmux 3.5 新增的 `M-6` / `M-7`（mirrored layout）未加入，避免依賴 server 版本。
+- `swap-pane` 與 `rotate-window` 在 tmux 3.2a 不會送出 `%layout-change`（只回 `%end`），pane 在 tmux 裡換了位置、畫面卻不會跟著變。
+  因此這兩類指令執行後改用 `display-message` 重新讀取 window layout，再走與 `%layout-change` 相同的處理；有送通知的 tmux 版本只會多同步一次。
+- Overlay 新增「Layout」群組，並調整兩種樣式在小視窗的排版：key 不再被壓縮、說明文字改為換行、置中卡片在窄視窗退成單欄，底部 bar 超過 pane 區域時改在框內捲動。
+- 修改檔案：`src/tmuxPrefix.ts`、`src/session.ts`（`nextLayout`、`selectLayout`、`spreadLayout`、`swapPane`、`rotateWindow`）、`src/components/tmuxSessionTab.component.ts`、`src/i18n.ts`，以及對應的 spec。
+
+## 10. close-pane 熱鍵真的關掉 tmux pane（`629f322`）
+
+Tabby 原生的 `close-pane` 熱鍵（macOS 預設 `⌘-Shift-W`，Windows / Linux 預設未綁定）由 `SplitTabComponent` 呼叫 `focusedTab.destroy()`。
+`TmuxPaneTabComponent.destroy()` 原本刻意只清掉本地畫面，結果 pane 從 UI 消失，卻仍在 tmux 裡執行，兩邊狀態不一致。
+
+- 無法改成攔截熱鍵：`SplitTabComponent` 在 constructor 就訂閱 `hotkey$`，比 plugin 的訂閱早，收到時 `destroy()` 已經被呼叫過了。
+- 修法：`destroy()` 遇到「pane 還掛在作用中的 session tab 上、且 controller 仍在追蹤它」時改送 `kill-pane`，不拆本地畫面，等 tmux 回報 pane 關閉後再走原本的清理路徑。
+- plugin 自己的清理路徑（window 關閉、pane 不在 layout 中、pane-close 通知）改呼叫新的 `destroyLocal()`，只拆本地畫面、不送 `kill-pane`。
+- session tab 覆寫 `destroy()`，在 `SplitTabComponent.destroy()` 逐一 destroy pane 之前先設 `isTearingDown`，關閉整個 session tab 或 detach 時不會把 pane 都殺掉。
+- 其他 plugin 直接呼叫 pane 的 `destroy()` 也會一併變成 `kill-pane`。
+- 修改檔案：`src/components/tmuxPaneTab.component.ts`、`src/components/tmuxSessionTab.component.ts`；新增 `src/components/tmuxPaneClose.spec.ts`。
+
 ## 驗證狀態
 
-- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（525 passed）皆通過。
+- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（550 passed）皆通過。
 - `pnpm run format:check` 在此 CRLF checkout 上會整庫失敗，與本分支無關；被改到的檔案以 `prettier --check --end-of-line auto` 檢查通過。
 - 鍵盤互動在 Tabby 1.0.238 內手動驗證；`doc/PLAN_PREFIX_KEY.md` 的手動 checklist 未在建置機上全數跑過。
 - 第 7 項（焦點被搶）已在 Tabby 1.0.238 內以「兩個分頁、同一個 session」的情境手動驗證：TUI 分頁連按 `prefix + Space` 持續有效，切回 tmux mode 分頁後可直接輸入。
 - 第 8 項（多位元組字元變 �）已在 Tabby 1.0.238 內手動驗證（2026-11-02，build `1.6.1+local-darkk6-1102-103315`）：在 tmux pane 內一次輸出兩萬個帶 SGR 顏色的中文字，以及實際操作 Claude CLI 的彩色畫面，都不再出現 �。
+- 第 9、10 項只有單元測試，尚未在 Tabby 內手動驗證。
 
 ## 改動統計
 
-相對 `master`：43 個檔案，+3957 / -100 行。
+相對 `master`：53 個檔案，+5215 / -260 行。

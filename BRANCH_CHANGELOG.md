@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### 新增
+
+- prefix 鍵加入 tmux 的 layout、交換與輪轉 pane：`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`。`C-o` 改為輪轉 pane，不再等同 `o`。
+
+### 修正
+
+- Tabby 的 close-pane 熱鍵只讓 pane 從畫面消失，tmux 裡的 pane 卻沒有關掉。
+
 ## [1.6.1+darkk6-00001] - 2026-11-02
 
 第一個發布版本。基底 upstream v1.6.1（`431584d`）。

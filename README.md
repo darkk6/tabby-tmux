@@ -21,7 +21,9 @@
 | 6   | **Home/End 在 tmux pane 內可用**：修正按鍵沒送出、送出後 zsh 又認不得的兩層問題                  | -                                                        | [§6](BRANCH_CHANGES.md#6-homeend-在-tmux-pane-內無效bdd0e5c)               |
 | 7   | **隱藏的 tmux mode 分頁不再搶鍵盤焦點**：另一分頁用 TUI tmux 操作同一 session 時不會失去焦點     | -                                                        | [§7](BRANCH_CHANGES.md#7-隱藏的-tmux-mode-分頁不再搶鍵盤焦點db0e574)       |
 | 8   | **中文等多位元組字元不再顯示成 �**：`%output` 與封包邊界切到 UTF-8 字元中間時正確重組            | -                                                        | [§8](BRANCH_CHANGES.md#8-中文等多位元組字元不再顯示成-5721e8b)             |
-| 9   | **建置腳本與 GitLab CI**：`scripts/build.sh`、`BUILD_NUMBER` 流水號版本、test → build → release  | -                                                        | [doc/BUILD_AND_RELEASE.md](doc/BUILD_AND_RELEASE.md)                       |
+| 9   | **prefix 鍵加入 layout / 交換 / 輪轉**：`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`      | -                                                        | [§9](BRANCH_CHANGES.md#9-prefix-鍵加入-layout--交換--輪轉6a9902c)          |
+| 10  | **close-pane 熱鍵真的關掉 tmux pane**：不再只從畫面消失、卻仍在 tmux 裡執行                      | -                                                        | [§10](BRANCH_CHANGES.md#10-close-pane-熱鍵真的關掉-tmux-pane629f322)       |
+| 11  | **建置腳本與 GitLab CI**：`scripts/build.sh`、`BUILD_NUMBER` 流水號版本、test → build → release  | -                                                        | [doc/BUILD_AND_RELEASE.md](doc/BUILD_AND_RELEASE.md)                       |
 
 ## 安裝
 
