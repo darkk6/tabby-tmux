@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ConfigService, Logger } from 'tabby-core'
 import type { Injector } from '@angular/core'
 import { Terminal } from '@xterm/headless'
+import { TMUX_LAYOUT_CHANGE_FORMAT } from './gateway'
 import { TmuxController, TmuxPaneSession } from './session'
 
 // tabby-terminal is an Angular partially-compiled package; loading it in Node
@@ -495,6 +496,63 @@ describe('TmuxController', () => {
 
         expect(written).toContain('kill-window -t @3\r')
     })
+
+    it.each([
+        ['next-layout', (c: TmuxController) => c.nextLayout(4), 'next-layout -t %4'],
+        [
+            'select-layout',
+            (c: TmuxController) => c.selectLayout(4, 'main-vertical'),
+            'select-layout -t %4 main-vertical',
+        ],
+        ['spread', (c: TmuxController) => c.spreadLayout(4), 'select-layout -E -t %4'],
+    ])('sends the %s layout command for the pane window', async (_name, run, command) => {
+        const { controller, written } = createController()
+        const pending = run(controller)
+
+        await waitForWrite(written, (writes) => writes.includes(`${command}\r`))
+        controller.gateway.executeData(Buffer.from('%begin 1 1 1\n%end 1\n'))
+        await pending
+
+        expect(written).toContain(`${command}\r`)
+    })
+
+    it.each([
+        ['swap up', (c: TmuxController) => c.swapPane(0, 'up'), 'swap-pane -U -t %0'],
+        ['swap down', (c: TmuxController) => c.swapPane(0, 'down'), 'swap-pane -D -t %0'],
+        ['rotate up', (c: TmuxController) => c.rotateWindow(0, 'up'), 'rotate-window -U -t %0'],
+        ['rotate down', (c: TmuxController) => c.rotateWindow(0, 'down'), 'rotate-window -D -t %0'],
+    ])(
+        're-reads the layout after %s, which sends no %layout-change',
+        async (_name, run, command) => {
+            const { controller, written } = createController()
+            const controllerInternals = controller as unknown as {
+                capturePaneSnapshots: () => Promise<boolean>
+                discoverWindowsAndPanes: () => Promise<void>
+            }
+            vi.spyOn(controllerInternals, 'capturePaneSnapshots').mockResolvedValue(true)
+            vi.spyOn(controllerInternals, 'discoverWindowsAndPanes').mockResolvedValue(undefined)
+            await initController(controller)
+
+            const layouts: unknown[] = []
+            controller.events.subscribe((event) => {
+                if (event.type === 'layout-change') layouts.push(event.data)
+            })
+            const pending = run(controller)
+            await waitForWrite(written, (writes) => writes.includes(`${command}\r`))
+            controller.gateway.executeData(Buffer.from('%begin 1 2 1\n%end 2\n'))
+
+            const reread = `display-message -p -t %0 "${TMUX_LAYOUT_CHANGE_FORMAT}"\r`
+            await waitForWrite(written, (writes) => writes.includes(reread))
+            const after = 'e553,200x50,0,0[200x25,0,0,1,200x24,0,26,0]'
+            controller.gateway.executeData(
+                Buffer.from(`%begin 1 3 1\n@0 ${after} ${after} *\n%end 3\n`),
+            )
+            await pending
+            await new Promise((resolve) => setTimeout(resolve, 0))
+
+            expect(layouts).toEqual([{ layout: after, visibleLayout: after, zoomed: false }])
+        },
+    )
 
     it('does not kill panes when the controller is destroyed', async () => {
         const { controller, written } = createController()

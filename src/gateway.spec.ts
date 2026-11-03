@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigService, Logger } from 'tabby-core'
-import { TMUX_COMMAND_TOLERATE_ERRORS, TmuxGateway } from './gateway'
+import { parseLayoutChangeFields, TMUX_COMMAND_TOLERATE_ERRORS, TmuxGateway } from './gateway'
 
 function createGateway(options?: { timeoutMs?: number; chunkSize?: number }) {
     const written: string[] = []
@@ -324,6 +324,18 @@ describe('TmuxGateway executeLine notifications', () => {
             },
             { windowId: 2, layout: 'aa,80x24,0,0', visibleLayout: 'bb,80x24,0,0', zoomed: true },
         ])
+    })
+
+    it('parses re-read layout fields and rejects anything else', () => {
+        expect(parseLayoutChangeFields('@3 aa,80x24,0,0,5 aa,80x24,0,0,5 *')).toEqual({
+            windowId: 3,
+            layout: 'aa,80x24,0,0,5',
+            visibleLayout: 'aa,80x24,0,0,5',
+            zoomed: false,
+        })
+        // A tolerated %error resolves with tmux's message instead of fields.
+        expect(parseLayoutChangeFields("can't find pane: %9")).toBeNull()
+        expect(parseLayoutChangeFields('')).toBeNull()
     })
 
     it('parses window add/close/renamed including unlinked variants', async () => {

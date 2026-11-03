@@ -25,6 +25,35 @@ export interface TmuxCommand {
     flags?: number
     onSuccess?: () => void
 }
+
+export interface TmuxLayoutChange {
+    windowId: number
+    layout: string
+    visibleLayout?: string
+    zoomed?: boolean
+}
+
+/** Format whose output matches the %layout-change arguments, for parseLayoutChangeFields. */
+export const TMUX_LAYOUT_CHANGE_FORMAT =
+    '#{window_id} #{window_layout} #{window_visible_layout} #{window_raw_flags}'
+
+/**
+ * Parse the %layout-change arguments: `@<window> <layout> [visible_layout
+ * raw_flags]`. TMUX_LAYOUT_CHANGE_FORMAT produces the same fields, for
+ * commands that rearrange panes without notifying control clients.
+ */
+export function parseLayoutChangeFields(text: string): TmuxLayoutChange | null {
+    const match = text.match(/^@(\d+) (.+)$/)
+    if (!match) return null
+
+    const windowId = parseInt(match[1])
+    const parts = match[2].split(' ')
+    const layout = parts[0]
+    const visibleLayout = parts.length > 1 ? parts[1] : undefined
+    const zoomed = parts.length > 2 ? parts[2].includes('Z') : undefined
+
+    return { windowId, layout, visibleLayout, zoomed }
+}
 /**
  * TmuxGateway - Protocol layer for tmux control mode
  *
@@ -56,12 +85,7 @@ export class TmuxGateway {
 
     // Events for notifications
     public output$ = new Subject<{ paneId: number; data: Buffer; latency?: number }>()
-    public layoutChange$ = new Subject<{
-        windowId: number
-        layout: string
-        visibleLayout?: string
-        zoomed?: boolean
-    }>()
+    public layoutChange$ = new Subject<TmuxLayoutChange>()
     public windowAdd$ = new Subject<number>()
     public windowClose$ = new Subject<number>()
     public windowRenamed$ = new Subject<{ windowId: number; name: string }>()
@@ -480,17 +504,10 @@ export class TmuxGateway {
     }
 
     private parseLayoutChange(line: string): void {
-        // %layout-change @<window> <layout> [visible_layout flags]
-        const match = line.match(/^%layout-change @(\d+) (.+)$/)
-        if (!match) return
-
-        const windowId = parseInt(match[1])
-        const parts = match[2].split(' ')
-        const layout = parts[0]
-        const visibleLayout = parts.length > 1 ? parts[1] : undefined
-        const zoomed = parts.length > 2 ? parts[2].includes('Z') : undefined
-
-        this.layoutChange$.next({ windowId, layout, visibleLayout, zoomed })
+        const change = parseLayoutChangeFields(line.slice('%layout-change '.length))
+        if (change) {
+            this.layoutChange$.next(change)
+        }
     }
 
     private parseWindowAdd(line: string): void {

@@ -3,7 +3,14 @@ import { BaseSession } from 'tabby-terminal'
 import { Logger, ConfigService } from 'tabby-core'
 import { createConditionalLogger, ConditionalLogger } from './logHelper'
 import { Injector } from '@angular/core'
-import { TmuxCommand, TmuxGateway, TMUX_COMMAND_TOLERATE_ERRORS } from './gateway'
+import {
+    parseLayoutChangeFields,
+    TmuxCommand,
+    TmuxGateway,
+    TmuxLayoutChange,
+    TMUX_COMMAND_TOLERATE_ERRORS,
+    TMUX_LAYOUT_CHANGE_FORMAT,
+} from './gateway'
 import { parsePaneState } from './paneState'
 import { buildSnapshotRestore, PaneSnapshot } from './paneSnapshot'
 import { normalizeHistoryRestoreLimit } from './historyRestore'
@@ -16,6 +23,7 @@ import {
 } from './tmuxKeymap'
 import { quoteTmuxArgument, normalizeRename, unescapeTmuxValue } from './tmuxRename'
 import { incompleteUtf8TailStart, leadingContinuationBytes } from './utf8Boundary'
+import type { PaneOrderDirection, TmuxPresetLayout } from './tmuxPrefix'
 
 interface PaneOutputChunk {
     data: Buffer
@@ -621,27 +629,7 @@ export class TmuxController {
         // IMPORTANT: We do NOT emit 'layout-change' here. discoverPanesFromLayout
         // emits it after pane-add events, ensuring syncLayout() always runs
         // after pane tabs have been created.
-        this.gateway.layoutChange$.subscribe(({ windowId, layout, visibleLayout, zoomed }) => {
-            const state = this.windowStates.get(windowId)
-            if (state) {
-                // tmux %layout-change semantics:
-                //   layout       = real multi-pane layout (all panes, actual sizes)
-                //   visibleLayout = what tmux displays (zoomed single pane when zoomed)
-                state.layout = layout
-                if (zoomed && visibleLayout) {
-                    // Extract zoomed pane ID from visibleLayout (the single pane filling window)
-                    const m = /\d+x\d+,\d+,\d+,(\d+)/.exec(visibleLayout)
-                    state.zoomedPaneId = m ? parseInt(m[1]) : undefined
-                    state.visibleLayout = visibleLayout
-                } else {
-                    state.zoomedPaneId = undefined
-                    state.visibleLayout = undefined
-                }
-            }
-
-            // Discover new panes from the layout string, then emit layout-change
-            this.discoverPanesFromLayout(windowId, layout, visibleLayout, zoomed)
-        })
+        this.gateway.layoutChange$.subscribe((change) => this.applyLayoutChange(change))
 
         // Handle exit
         // Handle session-window-changed — the current window changed
@@ -924,6 +912,46 @@ export class TmuxController {
      */
     async refreshPanes(): Promise<void> {
         return this.discoverWindowsAndPanes()
+    }
+
+    /** Record a window's layout (from %layout-change or a re-read) and sync the UI. */
+    private applyLayoutChange({ windowId, layout, visibleLayout, zoomed }: TmuxLayoutChange): void {
+        const state = this.windowStates.get(windowId)
+        if (state) {
+            // tmux %layout-change semantics:
+            //   layout       = real multi-pane layout (all panes, actual sizes)
+            //   visibleLayout = what tmux displays (zoomed single pane when zoomed)
+            state.layout = layout
+            if (zoomed && visibleLayout) {
+                // Extract zoomed pane ID from visibleLayout (the single pane filling window)
+                const m = /\d+x\d+,\d+,\d+,(\d+)/.exec(visibleLayout)
+                state.zoomedPaneId = m ? parseInt(m[1]) : undefined
+                state.visibleLayout = visibleLayout
+            } else {
+                state.zoomedPaneId = undefined
+                state.visibleLayout = undefined
+            }
+        }
+
+        // Discover new panes from the layout string, then emit layout-change
+        this.discoverPanesFromLayout(windowId, layout, visibleLayout, zoomed)
+    }
+
+    /**
+     * Re-read the layout of the window containing `paneId` and apply it like
+     * a %layout-change. swap-pane and rotate-window move panes between layout
+     * cells without notifying control clients (observed on tmux 3.2a), so
+     * the UI would keep showing the old order.
+     */
+    private async refreshWindowLayout(paneId: number): Promise<void> {
+        const output = await this.gateway.sendCommand(
+            `display-message -p -t %${paneId} "${TMUX_LAYOUT_CHANGE_FORMAT}"`,
+            TMUX_COMMAND_TOLERATE_ERRORS,
+        )
+        const change = parseLayoutChangeFields(output.trim())
+        if (change) {
+            this.applyLayoutChange(change)
+        }
     }
 
     /**
@@ -1488,6 +1516,55 @@ export class TmuxController {
             `resize-pane ${resizePaneFlag(action)} ${step} -t %${paneId}`,
             TMUX_COMMAND_TOLERATE_ERRORS,
         )
+    }
+
+    // Layout operations on the window containing `paneId`. tmux broadcasts
+    // %layout-change, which drives the pixel layout — no UI mutation here.
+
+    /** Cycle to the next layout (`prefix Space`). */
+    async nextLayout(paneId: number): Promise<void> {
+        await this.gateway.sendCommand(`next-layout -t %${paneId}`, TMUX_COMMAND_TOLERATE_ERRORS)
+    }
+
+    /** Apply a preset layout (`prefix M-1`..`M-5`). */
+    async selectLayout(paneId: number, layout: TmuxPresetLayout): Promise<void> {
+        await this.gateway.sendCommand(
+            `select-layout -t %${paneId} ${layout}`,
+            TMUX_COMMAND_TOLERATE_ERRORS,
+        )
+    }
+
+    /** Spread the panes out evenly (`prefix E`). */
+    async spreadLayout(paneId: number): Promise<void> {
+        await this.gateway.sendCommand(
+            `select-layout -E -t %${paneId}`,
+            TMUX_COMMAND_TOLERATE_ERRORS,
+        )
+    }
+
+    /**
+     * Swap `paneId` with the previous (`up`, `prefix {`) or next (`down`,
+     * `prefix }`) pane in its window; the pane keeps the focus, as in tmux.
+     * tmux sends no %layout-change for it, so the layout is re-read.
+     */
+    async swapPane(paneId: number, dir: PaneOrderDirection): Promise<void> {
+        await this.gateway.sendCommand(
+            `swap-pane ${dir === 'up' ? '-U' : '-D'} -t %${paneId}`,
+            TMUX_COMMAND_TOLERATE_ERRORS,
+        )
+        await this.refreshWindowLayout(paneId)
+    }
+
+    /**
+     * Rotate the panes of the window containing `paneId` (`prefix C-o` = up,
+     * `prefix M-o` = down). Like swap-pane, it sends no %layout-change.
+     */
+    async rotateWindow(paneId: number, dir: PaneOrderDirection): Promise<void> {
+        await this.gateway.sendCommand(
+            `rotate-window ${dir === 'up' ? '-U' : '-D'} -t %${paneId}`,
+            TMUX_COMMAND_TOLERATE_ERRORS,
+        )
+        await this.refreshWindowLayout(paneId)
     }
 
     // --- Window Operations ---

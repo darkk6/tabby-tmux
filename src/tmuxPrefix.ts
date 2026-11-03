@@ -275,8 +275,30 @@ export type PrefixAction =
     | { type: 'next-pane' }
     | { type: 'zoom' }
     | { type: 'kill-pane' }
+    | { type: 'next-layout' }
+    | { type: 'select-layout'; layout: TmuxPresetLayout }
+    | { type: 'spread-layout' }
+    | { type: 'swap-pane'; dir: PaneOrderDirection }
+    | { type: 'rotate-window'; dir: PaneOrderDirection }
     | { type: 'detach' }
     | { type: 'send-prefix' }
+
+/** tmux preset layouts bound to `prefix M-1` .. `prefix M-5`. */
+export type TmuxPresetLayout =
+    'even-horizontal' | 'even-vertical' | 'main-horizontal' | 'main-vertical' | 'tiled'
+
+/** swap-pane / rotate-window direction: `up` = -U (previous), `down` = -D (next). */
+export type PaneOrderDirection = 'up' | 'down'
+
+/** Alt + key, matched by scancode: macOS Option turns `event.key` into a symbol. */
+const ALT_ACTIONS: Record<string, PrefixAction> = {
+    Digit1: { type: 'select-layout', layout: 'even-horizontal' },
+    Digit2: { type: 'select-layout', layout: 'even-vertical' },
+    Digit3: { type: 'select-layout', layout: 'main-horizontal' },
+    Digit4: { type: 'select-layout', layout: 'main-vertical' },
+    Digit5: { type: 'select-layout', layout: 'tiled' },
+    KeyO: { type: 'rotate-window', dir: 'down' },
+}
 
 const ARROW_DIRECTIONS: Record<string, SplitDirection> = {
     ArrowLeft: 'l',
@@ -296,6 +318,10 @@ const SIMPLE_ACTIONS: Record<string, PrefixAction> = {
     o: { type: 'next-pane' },
     z: { type: 'zoom' },
     x: { type: 'kill-pane' },
+    ' ': { type: 'next-layout' },
+    E: { type: 'spread-layout' },
+    '{': { type: 'swap-pane', dir: 'up' },
+    '}': { type: 'swap-pane', dir: 'down' },
     d: { type: 'detach' },
 }
 
@@ -304,8 +330,10 @@ const SIMPLE_ACTIONS: Record<string, PrefixAction> = {
  * character) so `%` / `"` / `&` work on any layout. Letters are matched
  * exactly like tmux (`prefix X` is unbound, only `prefix x` kills the pane)
  * while a held Ctrl is ignored (`Ctrl-N` ≡ `n`, matching how most people
- * type `C-b C-n`). Alt/⌘ combos never match. Pressing the prefix again is
- * send-prefix. Returns null for an unsupported key.
+ * type `C-b C-n`) — except `C-o`, which tmux binds to rotate-window apart
+ * from `o`. Alt combos match only tmux's own `M-` bindings (layouts, rotate);
+ * ⌘ combos never match. Pressing the prefix again is send-prefix. Returns
+ * null for an unsupported key.
  */
 export function resolvePrefixAction(
     event: PrefixKeyEvent,
@@ -315,8 +343,14 @@ export function resolvePrefixAction(
     if (keystrokesEqual(keystrokeFromEvent(event, platform), prefixKey)) {
         return { type: 'send-prefix' }
     }
-    if (event.altKey || event.metaKey) {
+    if (event.metaKey) {
         return null
+    }
+    if (event.altKey) {
+        return event.ctrlKey || event.shiftKey ? null : (ALT_ACTIONS[event.code] ?? null)
+    }
+    if (event.ctrlKey && event.key === 'o') {
+        return { type: 'rotate-window', dir: 'up' }
     }
     const arrow = ARROW_DIRECTIONS[event.key]
     if (arrow) {
@@ -363,6 +397,18 @@ export const PREFIX_OVERLAY_GROUPS: readonly PrefixOverlayGroup[] = [
             { keys: 'o', label: 'prefix.nextPane' },
             { keys: 'z', label: 'prefix.zoom' },
             { keys: 'x', label: 'prefix.killPane' },
+        ],
+    },
+    {
+        label: 'prefix.group.layout',
+        entries: [
+            { keys: 'Space', label: 'prefix.nextLayout' },
+            { keys: 'M-1…5', label: 'prefix.selectLayout' },
+            { keys: 'E', label: 'prefix.spreadLayout' },
+            { keys: '{', label: 'prefix.swapPaneUp' },
+            { keys: '}', label: 'prefix.swapPaneDown' },
+            { keys: 'C-o', label: 'prefix.rotateUp' },
+            { keys: 'M-o', label: 'prefix.rotateDown' },
         ],
     },
     {
