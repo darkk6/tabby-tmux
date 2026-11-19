@@ -21,6 +21,7 @@
 | 中文等多位元組字元不再顯示成 �      | 無                                                       | -                     | upstream `217fccc`   |
 | prefix 鍵加入 layout / 交換 / 輪轉  | 無（沿用 `tmuxPlugin.prefixKey`）                        | -                     | `89637c1`            |
 | close-pane 熱鍵真的關掉 tmux pane   | 無                                                       | -                     | `0b67d9f`            |
+| 關閉 window 前先確認                | `tmuxPlugin.confirmWindowClose`                          | `true`                | `3259db6`            |
 
 ## 1. Force English UI（`3ef7f62`）
 
@@ -181,15 +182,24 @@ Tabby 原生的 `close-pane` 熱鍵（macOS 預設 `⌘-Shift-W`，Windows / Lin
 - 其他 plugin 直接呼叫 pane 的 `destroy()` 也會一併變成 `kill-pane`。
 - 修改檔案：`src/components/tmuxPaneTab.component.ts`、`src/components/tmuxSessionTab.component.ts`；新增 `src/components/tmuxPaneClose.spec.ts`。
 
+## 11. 關閉 window 前先確認（`3259db6`）
+
+window 分頁上的關閉按鈕緊貼著分頁名稱，很容易誤點，而且一點下去 tmux window 就直接被 `kill-window`，無法復原。
+
+- 按下關閉按鈕後，先跳出與 `prefix &` 相同的 inline 確認對話框（`TmuxConfirmDialogComponent`）：`Enter` 確認（焦點預設在確認按鈕）、`Esc` 或點對話框外取消，也可以直接點按鈕。
+- 新增設定 `tmuxPlugin.confirmWindowClose`（預設 `true`），在 plugin 設定頁的「Confirm before closing a window」切換；關掉後按關閉按鈕就直接關閉 window。
+- `prefix &` 不受這個設定影響，一律詢問，與 tmux 自己的 `confirm-before` 一致。
+- 修改檔案：`src/components/tmuxSessionTab.component.ts`（新增 `requestWindowClose()`，`prefix &` 與關閉按鈕共用 `confirmWindowClose()`）、`src/components/settings.component.ts`、`src/config.ts`、`src/i18n.ts`。
+
 ## 驗證狀態
 
-- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（550 passed）皆通過。
+- `pnpm run typecheck`、`lint`（0 errors）、`build`、`vitest`（542 passed）皆通過。
 - `pnpm run format:check` 在此 CRLF checkout 上會整庫失敗，與本分支無關；被改到的檔案以 `prettier --check --end-of-line auto` 檢查通過。
 - 鍵盤互動在 Tabby 1.0.238 內手動驗證；`doc/PLAN_PREFIX_KEY.md` 的手動 checklist 未在建置機上全數跑過。
 - 第 7 項（焦點被搶）已在 Tabby 1.0.238 內以「兩個分頁、同一個 session」的情境手動驗證：TUI 分頁連按 `prefix + Space` 持續有效，切回 tmux mode 分頁後可直接輸入。
-- 第 8 項（多位元組字元變 �）已在 Tabby 1.0.238 內手動驗證（2026-11-02，build `1.6.1+local-darkk6-1102-103315`）：在 tmux pane 內一次輸出兩萬個帶 SGR 顏色的中文字，以及實際操作 Claude CLI 的彩色畫面，都不再出現 �。
-- 第 9、10 項只有單元測試，尚未在 Tabby 內手動驗證。
+- 第 8 項（多位元組字元變 �）改用 upstream 修法後，在 Tabby 1.0.238 內以切斷字元、逐 byte、約兩萬字彩色中文、非法 bytes、多 pane 同時輸出手動驗證（2026-11-19）；尚未在 Claude CLI 長時間使用驗證，見 §8。
+- 第 9、10、11 項只有單元測試，尚未在 Tabby 內手動驗證。
 
 ## 改動統計
 
-相對 `master`：53 個檔案，+5215 / -260 行。
+相對 `master`：51 個檔案，+5012 / -252 行。

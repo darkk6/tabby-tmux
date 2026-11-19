@@ -23,7 +23,8 @@
 | 8   | **中文等多位元組字元不再顯示成 �**：已改用 upstream v1.6.2 的修法；尚未在 Claude CLI 長時間驗證  | -                                                        | [§8](BRANCH_CHANGES.md#8-中文等多位元組字元不再顯示成-upstream-217fccc)    |
 | 9   | **prefix 鍵加入 layout / 交換 / 輪轉**：`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`      | -                                                        | [§9](BRANCH_CHANGES.md#9-prefix-鍵加入-layout--交換--輪轉89637c1)          |
 | 10  | **close-pane 熱鍵真的關掉 tmux pane**：不再只從畫面消失、卻仍在 tmux 裡執行                      | -                                                        | [§10](BRANCH_CHANGES.md#10-close-pane-熱鍵真的關掉-tmux-pane0b67d9f)       |
-| 11  | **建置腳本與 GitLab CI**：`scripts/build.sh`、`BUILD_NUMBER` 流水號版本、test → build → release  | -                                                        | [doc/BUILD_AND_RELEASE.md](doc/BUILD_AND_RELEASE.md)                       |
+| 11  | **關閉 window 前先確認**：window 分頁的關閉按鈕先跳確認框，`Enter` 確認、`Esc` 取消              | `tmuxPlugin.confirmWindowClose`                          | [§11](BRANCH_CHANGES.md#11-關閉-window-前先確認3259db6)                    |
+| 12  | **建置腳本與 GitLab CI**：`scripts/build.sh`、`BUILD_NUMBER` 流水號版本、test → build → release  | -                                                        | [doc/BUILD_AND_RELEASE.md](doc/BUILD_AND_RELEASE.md)                       |
 
 ## 安裝
 
