@@ -134,6 +134,16 @@ import {
                 </div>
                 <div class="setting-row">
                     <div class="header">
+                        <div class="title">{{ i18n.t('settings.confirmWindowClose') }}</div>
+                    </div>
+                    <input
+                        type="checkbox"
+                        [(ngModel)]="config.store.tmuxPlugin.confirmWindowClose"
+                        (ngModelChange)="saveConfig()"
+                    />
+                </div>
+                <div class="setting-row">
+                    <div class="header">
                         <div class="title">{{ i18n.t('settings.prefixKey') }}</div>
                     </div>
                     <div class="setting-value prefix-key">

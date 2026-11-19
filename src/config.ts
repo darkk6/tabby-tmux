@@ -20,6 +20,8 @@ export class TmuxConfigProvider extends ConfigProvider {
             resizeDebounceMs: 150,
             debugLogging: false,
             showWindowCloseButton: true,
+            // Ask before the window bar's close button kills a tmux window.
+            confirmWindowClose: true,
             excludedMenuProviders: [] as string[],
             menuProviderLabels: [] as MenuProviderLabel[],
             // tmux-style prefix key (doc/PLAN_PREFIX_KEY.md). Deliberately NOT

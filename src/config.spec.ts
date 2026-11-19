@@ -44,6 +44,7 @@ describe('TmuxConfigProvider', () => {
             resizeDebounceMs: 150,
             debugLogging: false,
             showWindowCloseButton: true,
+            confirmWindowClose: true,
             excludedMenuProviders: [],
             menuProviderLabels: [],
             prefixKey: 'Ctrl-B',

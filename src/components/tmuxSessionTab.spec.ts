@@ -338,6 +338,7 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
         ngOnDestroy(): void
         handlePrefixKeydown(event: unknown): void
         resolveConfirm(accepted: boolean): void
+        requestWindowClose(windowId: number): void
         switchWindowByOffset: ReturnType<typeof vi.fn>
         enqueueSwitchToWindow: ReturnType<typeof vi.fn>
         onCreateWindow: ReturnType<typeof vi.fn>
@@ -624,6 +625,41 @@ describe('TmuxSessionTabComponent tmux prefix key', () => {
         } finally {
             vi.useRealTimers()
         }
+    })
+
+    it('asks before the window bar close button kills a window by default', async () => {
+        vi.useFakeTimers()
+        try {
+            const { tab } = await createPrefixTab()
+            tab.requestWindowClose(12)
+            expect(tab.onWindowClose).not.toHaveBeenCalled()
+            expect(tab.confirmRequest?.message).toBe('confirm.killWindow')
+            tab.resolveConfirm(false)
+            expect(tab.confirmRequest).toBeNull()
+            expect(tab.onWindowClose).not.toHaveBeenCalled()
+
+            tab.requestWindowClose(12)
+            tab.resolveConfirm(true)
+            expect(tab.onWindowClose).toHaveBeenCalledWith(12)
+            vi.runAllTimers()
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('closes a window right away when confirmWindowClose is off', async () => {
+        const { tab } = await createPrefixTab({ confirmWindowClose: false })
+        tab.requestWindowClose(12)
+        expect(tab.confirmRequest).toBeNull()
+        expect(tab.onWindowClose).toHaveBeenCalledWith(12)
+    })
+
+    it('still asks for prefix & when confirmWindowClose is off', async () => {
+        const { tab, listener } = await createPrefixTab({ confirmWindowClose: false })
+        listener(keyEvent('b', { ctrlKey: true }))
+        listener(keyEvent('&'))
+        expect(tab.confirmRequest?.message).toBe('confirm.killWindow')
+        expect(tab.onWindowClose).not.toHaveBeenCalled()
     })
 
     it('removes the capture listener on destroy', async () => {

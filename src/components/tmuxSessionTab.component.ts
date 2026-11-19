@@ -128,7 +128,7 @@ interface ConfirmRequest {
             [activeWindowId]="activeWindowId"
             [colorScheme]="hostProfile?.terminalColorScheme ?? null"
             (windowSwitch)="enqueueSwitchToWindow($event, true)"
-            (windowClose)="onWindowClose($event)"
+            (windowClose)="requestWindowClose($event)"
             (renameRequested)="requestWindowRename($event)"
             (disconnect)="onDisconnect()"
             (createWindow)="onCreateWindow()"
@@ -2202,11 +2202,8 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
             case 'kill-window': {
                 const windowId = this.activeWindowId
                 if (windowId === null) break
-                const state = controller.getWindowState(windowId)
-                const name = state?.name || this.i18n.t('window.defaultName', { id: windowId })
-                this.requestConfirm(this.i18n.t('confirm.killWindow', { name }), () => {
-                    void this.onWindowClose(windowId)
-                })
+                // Always asks, like tmux's own `confirm-before` for prefix &.
+                this.confirmWindowClose(windowId)
                 break
             }
             case 'split':
@@ -2310,6 +2307,27 @@ export class TmuxSessionTabComponent extends SplitTabComponent implements OnInit
         if (ctx) {
             this.tmuxService.disconnectContext(ctx)
         }
+    }
+
+    /**
+     * Close button on a window tab. It sits right next to the tab label, so a
+     * stray click is easy: ask first unless `confirmWindowClose` is off.
+     */
+    requestWindowClose(windowId: number): void {
+        if (this.configService?.store?.tmuxPlugin?.confirmWindowClose ?? true) {
+            this.confirmWindowClose(windowId)
+        } else {
+            void this.onWindowClose(windowId)
+        }
+    }
+
+    private confirmWindowClose(windowId: number): void {
+        const name =
+            this.controller?.getWindowState(windowId)?.name ||
+            this.i18n.t('window.defaultName', { id: windowId })
+        this.requestConfirm(this.i18n.t('confirm.killWindow', { name }), () => {
+            void this.onWindowClose(windowId)
+        })
     }
 
     async onWindowClose(windowId: number): Promise<void> {
