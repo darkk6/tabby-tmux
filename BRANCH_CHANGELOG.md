@@ -9,12 +9,17 @@
 
 ## [Unreleased]
 
+## [1.6.2+darkk6-00002] - 2026-11-19
+
+基底更新為 upstream v1.6.2（`2248485`）。
+
 ### 變更
 
-- 基底更新為 upstream v1.6.2。中文字元顯示成 � 的問題改用 upstream 的修法，取代本分支在 1.6.1+darkk6-00001 的版本（尚未在 Claude CLI 長時間驗證）。
+- 中文字元顯示成 � 的問題改用 upstream v1.6.2 的修法，取代本分支在 1.6.1+darkk6-00001 的版本。已在 Tabby 內手動測試，但尚未在 Claude CLI 長時間使用驗證。
 
 ### 新增
 
+- 關閉 window 前先確認：按 window 分頁上的關閉按鈕會先跳出確認框，`Enter` 確認、`Esc` 取消。可在 plugin 設定頁以「Confirm before closing a window」（`tmuxPlugin.confirmWindowClose`，預設開啟）關閉。
 - prefix 鍵加入 tmux 的 layout、交換與輪轉 pane：`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`。`C-o` 改為輪轉 pane，不再等同 `o`。
 
 ### 修正
