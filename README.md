@@ -13,16 +13,16 @@
 
 | #   | 改動                                                                                             | 設定鍵                                                   | 細節                                                                       |
 | --- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 1   | **Force English UI**：plugin 介面可強制英文，不再因 `zh-TW` 被對應到簡體中文                     | `tmuxPlugin.forceEnglish`                                | [§1](BRANCH_CHANGES.md#1-force-english-uidd3fe43)                          |
-| 2   | **進入 tmux mode 前詢問 session 名稱**：右鍵選單與熱鍵都先跳出對話框，預設帶入設定值             | 沿用 `tmuxPlugin.defaultSessionName`                     | [§2](BRANCH_CHANGES.md#2-進入-tmux-mode-前詢問-session-名稱d071dceadb5d87) |
-| 3   | **tmux prefix key 與按鍵提示 overlay**：在 pane 內找回 `prefix + key`（`c`、`n`/`p`、`%`、`z`…） | `tmuxPlugin.prefixKey` / `tmuxPlugin.prefixOverlayStyle` | [§3](BRANCH_CHANGES.md#3-tmux-prefix-key-與按鍵提示-overlayb1ff9b3a4cc4c1) |
-| 4   | **視窗分頁顯示 tmux window index**：分頁標籤改為 `<index>:<name>`                                | -                                                        | [§4](BRANCH_CHANGES.md#4-視窗分頁顯示-tmux-window-indexa7fbdd5)            |
-| 5   | **加大視窗分頁列**：14px 字級、28px 高的分頁                                                     | -                                                        | [§5](BRANCH_CHANGES.md#5-加大視窗分頁列8337ad0)                            |
-| 6   | **Home/End 在 tmux pane 內可用**：修正按鍵沒送出、送出後 zsh 又認不得的兩層問題                  | -                                                        | [§6](BRANCH_CHANGES.md#6-homeend-在-tmux-pane-內無效bdd0e5c)               |
-| 7   | **隱藏的 tmux mode 分頁不再搶鍵盤焦點**：另一分頁用 TUI tmux 操作同一 session 時不會失去焦點     | -                                                        | [§7](BRANCH_CHANGES.md#7-隱藏的-tmux-mode-分頁不再搶鍵盤焦點db0e574)       |
-| 8   | **中文等多位元組字元不再顯示成 �**：`%output` 與封包邊界切到 UTF-8 字元中間時正確重組            | -                                                        | [§8](BRANCH_CHANGES.md#8-中文等多位元組字元不再顯示成-5721e8b)             |
-| 9   | **prefix 鍵加入 layout / 交換 / 輪轉**：`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`      | -                                                        | [§9](BRANCH_CHANGES.md#9-prefix-鍵加入-layout--交換--輪轉6a9902c)          |
-| 10  | **close-pane 熱鍵真的關掉 tmux pane**：不再只從畫面消失、卻仍在 tmux 裡執行                      | -                                                        | [§10](BRANCH_CHANGES.md#10-close-pane-熱鍵真的關掉-tmux-pane629f322)       |
+| 1   | **Force English UI**：plugin 介面可強制英文，不再因 `zh-TW` 被對應到簡體中文                     | `tmuxPlugin.forceEnglish`                                | [§1](BRANCH_CHANGES.md#1-force-english-ui3ef7f62)                          |
+| 2   | **進入 tmux mode 前詢問 session 名稱**：右鍵選單與熱鍵都先跳出對話框，預設帶入設定值             | 沿用 `tmuxPlugin.defaultSessionName`                     | [§2](BRANCH_CHANGES.md#2-進入-tmux-mode-前詢問-session-名稱d9986b2a44ae3c) |
+| 3   | **tmux prefix key 與按鍵提示 overlay**：在 pane 內找回 `prefix + key`（`c`、`n`/`p`、`%`、`z`…） | `tmuxPlugin.prefixKey` / `tmuxPlugin.prefixOverlayStyle` | [§3](BRANCH_CHANGES.md#3-tmux-prefix-key-與按鍵提示-overlay5759f11de1b2d7) |
+| 4   | **視窗分頁顯示 tmux window index**：分頁標籤改為 `<index>:<name>`                                | -                                                        | [§4](BRANCH_CHANGES.md#4-視窗分頁顯示-tmux-window-index5913d2f)            |
+| 5   | **加大視窗分頁列**：14px 字級、28px 高的分頁                                                     | -                                                        | [§5](BRANCH_CHANGES.md#5-加大視窗分頁列57bb4ef)                            |
+| 6   | **Home/End 在 tmux pane 內可用**：修正按鍵沒送出、送出後 zsh 又認不得的兩層問題                  | -                                                        | [§6](BRANCH_CHANGES.md#6-homeend-在-tmux-pane-內無效737f7e7)               |
+| 7   | **隱藏的 tmux mode 分頁不再搶鍵盤焦點**：另一分頁用 TUI tmux 操作同一 session 時不會失去焦點     | -                                                        | [§7](BRANCH_CHANGES.md#7-隱藏的-tmux-mode-分頁不再搶鍵盤焦點b0d36e1)       |
+| 8   | **中文等多位元組字元不再顯示成 �**：已改用 upstream v1.6.2 的修法；尚未在 Claude CLI 長時間驗證  | -                                                        | [§8](BRANCH_CHANGES.md#8-中文等多位元組字元不再顯示成-upstream-217fccc)    |
+| 9   | **prefix 鍵加入 layout / 交換 / 輪轉**：`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`      | -                                                        | [§9](BRANCH_CHANGES.md#9-prefix-鍵加入-layout--交換--輪轉89637c1)          |
+| 10  | **close-pane 熱鍵真的關掉 tmux pane**：不再只從畫面消失、卻仍在 tmux 裡執行                      | -                                                        | [§10](BRANCH_CHANGES.md#10-close-pane-熱鍵真的關掉-tmux-pane0b67d9f)       |
 | 11  | **建置腳本與 GitLab CI**：`scripts/build.sh`、`BUILD_NUMBER` 流水號版本、test → build → release  | -                                                        | [doc/BUILD_AND_RELEASE.md](doc/BUILD_AND_RELEASE.md)                       |
 
 ## 安裝

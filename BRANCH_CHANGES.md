@@ -1,6 +1,6 @@
 # darkk6 分支改動說明
 
-本分支是 [ruanimal/tabby-tmux](https://github.com/ruanimal/tabby-tmux) 的個人修改版，基底為 upstream `master`（v1.6.1 + 一個 docs commit，`431584d`）。
+本分支是 [ruanimal/tabby-tmux](https://github.com/ruanimal/tabby-tmux) 的個人修改版，基底為 upstream `master`（v1.6.2 + 一個 docs commit，`2248485`）。
 `master` 分支維持與 upstream 同步，所有個人修改都只放在 `darkk6`。
 
 建置、部署與 GitLab CI 發布方式見 [doc/BUILD_AND_RELEASE.md](doc/BUILD_AND_RELEASE.md)（`scripts/build.sh`、`.gitlab-ci.yml`）。
@@ -11,18 +11,18 @@
 
 | 功能                                | 設定鍵                                                   | 預設值                | 相關 commit          |
 | ----------------------------------- | -------------------------------------------------------- | --------------------- | -------------------- |
-| Force English UI                    | `tmuxPlugin.forceEnglish`                                | `false`               | `dd3fe43`            |
-| 進入 tmux mode 前詢問 session 名稱  | 無（沿用 `tmuxPlugin.defaultSessionName`）               | -                     | `d071dce`, `adb5d87` |
-| tmux prefix key 與按鍵提示 overlay  | `tmuxPlugin.prefixKey` / `tmuxPlugin.prefixOverlayStyle` | `Ctrl-B` / bottom bar | `b1ff9b3`, `a4cc4c1` |
-| 視窗分頁顯示 tmux window index      | 無                                                       | -                     | `a7fbdd5`            |
-| 加大視窗分頁列                      | 無                                                       | -                     | `8337ad0`            |
-| Home/End 在 tmux pane 內無效        | 無                                                       | -                     | `bdd0e5c`            |
-| 隱藏的 tmux mode 分頁不再搶鍵盤焦點 | 無                                                       | -                     | `db0e574`            |
-| 中文等多位元組字元不再顯示成 �      | 無                                                       | -                     | `5721e8b`, `7a7dce2` |
-| prefix 鍵加入 layout / 交換 / 輪轉  | 無（沿用 `tmuxPlugin.prefixKey`）                        | -                     | `6a9902c`            |
-| close-pane 熱鍵真的關掉 tmux pane   | 無                                                       | -                     | `629f322`            |
+| Force English UI                    | `tmuxPlugin.forceEnglish`                                | `false`               | `3ef7f62`            |
+| 進入 tmux mode 前詢問 session 名稱  | 無（沿用 `tmuxPlugin.defaultSessionName`）               | -                     | `d9986b2`, `a44ae3c` |
+| tmux prefix key 與按鍵提示 overlay  | `tmuxPlugin.prefixKey` / `tmuxPlugin.prefixOverlayStyle` | `Ctrl-B` / bottom bar | `5759f11`, `de1b2d7` |
+| 視窗分頁顯示 tmux window index      | 無                                                       | -                     | `5913d2f`            |
+| 加大視窗分頁列                      | 無                                                       | -                     | `57bb4ef`            |
+| Home/End 在 tmux pane 內無效        | 無                                                       | -                     | `737f7e7`            |
+| 隱藏的 tmux mode 分頁不再搶鍵盤焦點 | 無                                                       | -                     | `b0d36e1`            |
+| 中文等多位元組字元不再顯示成 �      | 無                                                       | -                     | upstream `217fccc`   |
+| prefix 鍵加入 layout / 交換 / 輪轉  | 無（沿用 `tmuxPlugin.prefixKey`）                        | -                     | `89637c1`            |
+| close-pane 熱鍵真的關掉 tmux pane   | 無                                                       | -                     | `0b67d9f`            |
 
-## 1. Force English UI（`dd3fe43`）
+## 1. Force English UI（`3ef7f62`）
 
 Tabby 會把所有 `zh-*` locale（含 `zh-TW`）對應到本 plugin 的簡體中文字串。
 新增 `tmuxPlugin.forceEnglish` 設定，勾選後 plugin 介面強制使用英文，取消勾選則回到跟隨 Tabby locale。
@@ -30,7 +30,7 @@ Tabby 會把所有 `zh-*` locale（含 `zh-TW`）對應到本 plugin 的簡體�
 - 即時生效：透過既有的 `TmuxConfigChangeService -> languageChange$` 鏈，不需重啟。
 - 修改檔案：`src/components/settings.component.ts`、`src/services/tmuxI18n.service.ts`、`src/config.ts`、`src/i18n.ts`。
 
-## 2. 進入 tmux mode 前詢問 session 名稱（`d071dce`、`adb5d87`）
+## 2. 進入 tmux mode 前詢問 session 名稱（`d9986b2`、`a44ae3c`）
 
 tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，現在會先跳出 modal 詢問 session 名稱。
 
@@ -38,10 +38,10 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 - 含有空白、`.`、`:`、`;` 的名稱無法送出（tmux 或 shell 會把它們弄壞）；其他名稱會先經過 shell quoting 再交給 `tmux -CC new -A -s`。
 - 對話框開啟期間再次觸發會被忽略；設定中的預設名稱永遠不會被覆寫。
 - 使用 `NgbModal` 開啟：此時 host 仍是 Tabby 自己的 terminal tab，rename 用的 in-tab overlay 無處可渲染。
-- `adb5d87` 修正：在 Angular zone 內填入對話框內容。原本在 `zone.run()` 之外賦值會先渲染出空白對話框，且預填名稱不再是選取狀態。
+- `a44ae3c` 修正：在 Angular zone 內填入對話框內容。原本在 `zone.run()` 之外賦值會先渲染出空白對話框，且預填名稱不再是選取狀態。
 - 新增檔案：`src/components/tmuxSessionNameDialog.component.ts`、`src/services/tmuxSessionNamePrompt.service.ts`、`src/tmuxSessionName.ts`（含各自的 spec）。
 
-## 3. tmux prefix key 與按鍵提示 overlay（`b1ff9b3`、`a4cc4c1`）
+## 3. tmux prefix key 與按鍵提示 overlay（`5759f11`、`de1b2d7`）
 
 在 tmux mode 內找回 tmux 的 `prefix + key` 操作習慣。設計細節與衝突分析見 `doc/PLAN_PREFIX_KEY.md`，
 `doc/DESIGN_KEYBINDINGS.md` 新增「第四層」章節說明。
@@ -70,7 +70,7 @@ tab 右鍵選單的「Enter Tmux Mode」與切換熱鍵的「進入」方向，�
 | `d`             | detach（離開 tmux mode）                      |
 | prefix 再按一次 | 把 prefix 本身送進 pane（走 pane input 路徑） |
 
-layout、交換與輪轉 pane 的按鍵（`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`）之後才加入，見 [§9](#9-prefix-鍵加入-layout--交換--輪轉6a9902c)。
+layout、交換與輪轉 pane 的按鍵（`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`）之後才加入，見 [§9](#9-prefix-鍵加入-layout--交換--輪轉89637c1)。
 
 - `Esc`、任何不支援的鍵、滑鼠點擊或失去 tab 焦點都會取消。
 - 第二鍵時 Ctrl 可以不放開（`Ctrl-B Ctrl-N` 等同 `Ctrl-B n`）；字母大小寫敏感，與 tmux 一致。
@@ -83,7 +83,7 @@ layout、交換與輪轉 pane 的按鍵（`Space`、`M-1`–`M-5`、`E`、`{` / 
 - 新增檔案：`src/tmuxPrefix.ts`、`src/components/tmuxPrefixOverlay.component.ts`、`src/components/tmuxConfirmDialog.component.ts`（含 spec）。
 - 兩份 README 都補上 prefix 鍵表。
 
-## 4. 視窗分頁顯示 tmux window index（`a7fbdd5`）
+## 4. 視窗分頁顯示 tmux window index（`5913d2f`）
 
 視窗分頁改為 `<index>:<name>` 格式，與 tmux status line 一致，讓 `prefix <數字>`（依 `#{window_index}` 而非分頁位置選取）的結果可預期。
 
@@ -91,11 +91,11 @@ layout、交換與輪轉 pane 的按鍵（`Space`、`M-1`–`M-5`、`E`、`{` / 
 - 分頁列的 change signature 納入 label，因此 `move-window` 重新編號後，與 rename 一樣會重新顯示作用中的分頁。
 - 修改檔案：`src/components/tmuxWindowBar.component.ts`。
 
-## 5. 加大視窗分頁列（`8337ad0`）
+## 5. 加大視窗分頁列（`57bb4ef`）
 
 分頁列設定絕對 14px 字級，內部所有尺寸改用 em 表示，分頁（現為 28px 高）、badge 與按鈕隨這一個數字一起縮放。
 
-## 6. Home/End 在 tmux pane 內無效（`bdd0e5c`）
+## 6. Home/End 在 tmux pane 內無效（`737f7e7`）
 
 修正 plugin pane 內 `Home` / `End` 完全沒反應的問題（`cat -v` 什麼都不顯示），典型症狀是 zsh 的 autosuggestion 無法用 `End` 採用。兩個原因疊在一起：
 
@@ -109,7 +109,7 @@ layout、交換與輪轉 pane 的按鍵（`Space`、`M-1`–`M-5`、`E`、`{` / 
 - 其他輸入（連續按鍵、貼上文字、滑鼠回報、xterm 與 tmux 編碼本來就相同的方向鍵等）維持原本的 `-H` 路徑。
 - 新增檔案：`src/tmuxInputKeys.ts`（含 spec）；修改 `src/gateway.ts`、`src/components/tmuxSessionTab.component.ts`、`doc/DESIGN_KEYBINDINGS.md`。
 
-## 7. 隱藏的 tmux mode 分頁不再搶鍵盤焦點（`db0e574`）
+## 7. 隱藏的 tmux mode 分頁不再搶鍵盤焦點（`b0d36e1`）
 
 修正「一個 Tabby 分頁在 tmux mode、另一個分頁用一般 `tmux attach` 進同一個 session」時，TUI 分頁按 `prefix + Space` 換排版只有第一次有效，之後要先點一下滑鼠才會再有反應的問題。
 
@@ -126,23 +126,29 @@ layout、交換與輪轉 pane 的按鍵（`Space`、`M-1`–`M-5`、`E`、`{` / 
 - 附帶效果：Tabby 啟動時還原多個分頁，非作用中的 tmux mode 分頁也不會再把焦點從作用中的分頁搶走。
 - 新增檔案：`src/paneDomFocus.ts`（含 spec）；修改 `src/components/tmuxPaneTab.component.ts`。
 
-## 8. 中文等多位元組字元不再顯示成 �（`5721e8b`）
+## 8. 中文等多位元組字元不再顯示成 �（upstream `217fccc`）
 
 修正 pane 內的 CJK 字元偶爾變成 `���` 或 `��`，在 Claude Code 這類會整個畫面重繪、帶大量顏色碼的 TUI 裡特別常見；按 `Ctrl+L` 有時會好、有時壞字換位置的問題。
+
+本分支原本自己修了這個問題（`5721e8b`、`7a7dce2`，2026-11-02，仍可在 tag `v1.6.1+darkk6-00001` 的歷史找到），upstream v1.6.2 以 `217fccc fix(output): preserve split UTF-8 characters` 修了同一件事。
+rebase 到 v1.6.2 時（2026-11-19）捨棄了本分支的兩個 commit，改用 upstream 的修法；兩者改在同樣的函式，無法並存。
+目前這一項不再是本分支的程式碼，留在這裡是為了記錄原因與驗證狀態。
 
 - 原因：tmux control mode 的 `%output` 把 pane 的 UTF-8 位元組原樣送出（只跳脫 0x20 以下與反斜線），而且 tmux 讀到多少就送多少、每行 payload 另有位元組上限，兩者都不對齊字元邊界，
   所以一個 3 bytes 的中文字可能被切在兩行 `%output` 之間，或被切在兩個 SSH/PTY 封包之間。plugin 原本把每個封包 `toString('utf-8')`、再把每行 `%output` 單獨解碼成 Buffer，
   而 Tabby 的 session 層也是逐個 Buffer `toString()`，三處都是一次性解碼：殘缺的前半段變成 �，下一塊的後半段也變成 �（切在第 1 byte 後是 3 個 �，第 2 byte 後是 2 個 �）。
   tmux 自己的 pane 內容是對的，壞的只有 Tabby 這端的畫面；`Ctrl+L` 讓程式重畫，輸出重新切塊，切點換位置而已。
-- 修法（gateway）：`executeData()` 改用 Buffer 累積、以 `0x0A` 切行；`%output` / `%extended-output` 在位元組層級解析（八進位跳脫轉 byte、其餘原樣複製），
-  以 `executeLine(header, payload)` 傳給既有的分派邏輯，其他通知行與命令回應仍整行轉字串。gateway 的輸出契約是「tmux 送什麼位元組就轉什麼」。
-- 修法（session）：`TmuxPaneSession` 新增單一送出點 `emitPaneOutput()`：結尾若是不完整但合法的 UTF-8 前綴（最多 3 bytes）就先保留，接到下一次輸出前面；
-  snapshot 之後的第一筆輸出若以 continuation byte 開頭，其前半段已被 snapshot 蓋住並完整畫出，所以丟掉這些孤兒位元組（其他時候原樣送出）；
-  `feedSnapshot()` 套用 snapshot 時清掉尾巴（snapshot 已含完整字元）。尾巴只在實際送出的輸出之間傳遞，不受 `_pendingOutput` 依 sequence 丟棄的影響。
-- 非 UTF-8 輸出（二進位、Latin-1）不受影響：只有合法前綴會被暫留，下一塊接不上就原樣送出，結果與修改前相同，只是晚一拍。
-- 新增檔案：`src/utf8Boundary.ts`（含 spec）；修改 `src/gateway.ts`、`src/session.ts`，並在 `gateway.spec.ts`、`session.spec.ts` 加入封包切斷與 `%output` 切斷的回歸測試。
+- upstream 修法（gateway）：`executeData()` 以 latin1 累積控制串流，每個 byte 原樣保留；`%output` / `%extended-output` 的 payload 以 byte 解碼，其他通知行與命令回應組成完整一行後才轉成 UTF-8 字串。
+- upstream 修法（session）：`TmuxPaneSession` 在 session middleware 最後加上 `PaneUTF8Splitter`，把結尾不完整的 UTF-8 序列暫留到下一次輸出；
+  trzsz 等需要二進位的 middleware 排在它前面，拿到的仍是原始 bytes。snapshot 已涵蓋、不送出的輸出仍會經過 splitter（`discard()`），
+  所以前半段在 snapshot 涵蓋範圍內、後半段在 snapshot 之後的字元也能接回來；pane 關閉時把剩下的 bytes 送出。
+- 與本分支舊修法的差異：舊修法在 snapshot 後的第一筆輸出直接丟掉開頭的 continuation bytes，假設 snapshot 已畫出完整字元；
+  但 tmux 的 snapshot 也不含半個字元，那個字會遺失。upstream 的做法沒有這個問題。
+- 驗證狀態（2026-11-19，`1.6.2+local-trial-rebase-a-00001`）：lint、typecheck、`pnpm test`（539 passed）、build 通過；
+  在 Tabby 實機以切斷字元、逐 byte、約 20k 字彩色中文、非法 bytes、多 pane 同時輸出等情境手動測試正常。
+  **尚未在 Claude CLI 長時間使用驗證**（原本最常出問題的情境）；若之後在 Claude CLI 再看到 �，從這裡接著查。
 
-## 9. prefix 鍵加入 layout / 交換 / 輪轉（`6a9902c`）
+## 9. prefix 鍵加入 layout / 交換 / 輪轉（`89637c1`）
 
 補上 tmux 預設綁定裡排列 pane 的按鍵。每個鍵都只送一個 control mode 指令，目標是目前焦點所在的 pane（tmux 會解析成它所屬的 window）；
 畫面由 tmux 回傳的 `%layout-change` 驅動，與既有的分割、zoom 走同一條路，plugin 不自己改版面。
@@ -163,7 +169,7 @@ layout、交換與輪轉 pane 的按鍵（`Space`、`M-1`–`M-5`、`E`、`{` / 
 - Overlay 新增「Layout」群組，並調整兩種樣式在小視窗的排版：key 不再被壓縮、說明文字改為換行、置中卡片在窄視窗退成單欄，底部 bar 超過 pane 區域時改在框內捲動。
 - 修改檔案：`src/tmuxPrefix.ts`、`src/session.ts`（`nextLayout`、`selectLayout`、`spreadLayout`、`swapPane`、`rotateWindow`）、`src/components/tmuxSessionTab.component.ts`、`src/i18n.ts`，以及對應的 spec。
 
-## 10. close-pane 熱鍵真的關掉 tmux pane（`629f322`）
+## 10. close-pane 熱鍵真的關掉 tmux pane（`0b67d9f`）
 
 Tabby 原生的 `close-pane` 熱鍵（macOS 預設 `⌘-Shift-W`，Windows / Linux 預設未綁定）由 `SplitTabComponent` 呼叫 `focusedTab.destroy()`。
 `TmuxPaneTabComponent.destroy()` 原本刻意只清掉本地畫面，結果 pane 從 UI 消失，卻仍在 tmux 裡執行，兩邊狀態不一致。

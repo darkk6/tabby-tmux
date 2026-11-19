@@ -9,6 +9,10 @@
 
 ## [Unreleased]
 
+### 變更
+
+- 基底更新為 upstream v1.6.2。中文字元顯示成 � 的問題改用 upstream 的修法，取代本分支在 1.6.1+darkk6-00001 的版本（尚未在 Claude CLI 長時間驗證）。
+
 ### 新增
 
 - prefix 鍵加入 tmux 的 layout、交換與輪轉 pane：`Space`、`M-1`–`M-5`、`E`、`{` / `}`、`C-o` / `M-o`。`C-o` 改為輪轉 pane，不再等同 `o`。
